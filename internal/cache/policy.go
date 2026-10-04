@@ -74,9 +74,11 @@ func Evaluate(in PolicyInput, cfg PolicyConfig) domain.CacheDecision {
 	if in.CacheBypass {
 		return bypass(domain.CacheBypassRequested)
 	}
-	if in.Stream {
-		return bypass(domain.CacheBypassStreaming)
-	}
+	// Streams are first-class cache citizens: a hit replays the stored
+	// response as SSE, and a cleanly completed stream is stored for future
+	// reuse. Only complete responses are ever written (the store path
+	// assembles the full body and drops truncated, failed or tool-call
+	// streams), so streaming through the cache is safe by construction.
 	if in.Sensitive {
 		return bypass(domain.CacheBypassSensitive)
 	}
@@ -93,8 +95,9 @@ func Evaluate(in PolicyInput, cfg PolicyConfig) domain.CacheDecision {
 		return bypass(domain.CacheBypassMultiSample)
 	}
 	if in.HasTools && cfg.BypassTools {
-		// Safe built-ins (now/echo) are deterministic and tiny; anything else
-		// may depend on definitions, approvals or side effects.
+		// Safe built-ins (echo) are deterministic and tiny; anything else
+		// may depend on definitions, approvals, side effects — or the
+		// clock ("now").
 		if !in.ToolsSafe {
 			return bypass(domain.CacheBypassToolRequest)
 		}
@@ -146,20 +149,31 @@ func looksLive(in KeyInput) bool {
 // ToolsSafeForCache reports whether the attached tools are deterministic
 // built-ins whose results are safe to reuse. Registry tools are resolved by
 // the caller; wire-only tools default to unsafe.
+//
+// Only "echo" qualifies: it is a pure function of its arguments. "now" is
+// deliberately excluded — it returns the current time, so any answer built
+// on it goes stale the moment it is cached. Time-dependent tools must
+// bypass with the tool_request reason, never reuse.
 func ToolsSafeForCache(tools []domain.Tool, registrySafe map[string]bool) bool {
 	if len(tools) == 0 {
 		return true
 	}
 	for _, t := range tools {
 		name := t.Function.Name
+		// "now" reads the clock no matter who vouches for it: a
+		// registry verdict of safe cannot make time deterministic.
+		if strings.EqualFold(name, "now") {
+			return false
+		}
 		if safe, ok := registrySafe[name]; ok {
 			if !safe {
 				return false
 			}
 			continue
 		}
-		// Unknown wire tools: only the deterministic built-ins are safe.
-		if name != "now" && name != "echo" {
+		// Unknown wire tools: only the deterministic built-ins are safe,
+		// and "now" is not among them (it reads the clock).
+		if name != "echo" {
 			return false
 		}
 	}

@@ -50,7 +50,7 @@ type KeyInput struct {
 func (in KeyInput) PromptHash() string {
 	h := sha256.New()
 	for _, m := range in.Messages {
-		h.Write([]byte(string(m.Role)))
+		h.Write([]byte(string(m.Role.Normalize())))
 		h.Write([]byte{0})
 		h.Write([]byte(normalize(m.Text())))
 		h.Write([]byte{0})
@@ -58,7 +58,9 @@ func (in KeyInput) PromptHash() string {
 			for _, tc := range m.ToolCalls {
 				h.Write([]byte(tc.Function.Name))
 				h.Write([]byte{0})
-				h.Write([]byte(tc.Function.Arguments))
+				// Arguments are canonicalized so equivalent JSON with
+				// different field order or whitespace shares a key.
+				h.Write([]byte(canonicalJSONString(tc.Function.Arguments)))
 				h.Write([]byte{0})
 			}
 		}
@@ -88,14 +90,17 @@ func (in KeyInput) ToolsHash() string {
 		h.Write([]byte{0})
 		h.Write([]byte(t.Function.Description))
 		h.Write([]byte{0})
-		h.Write(t.Function.Parameters)
+		// Parameters are canonicalized: the same schema with reordered
+		// keys or different whitespace must map to the same entry, while
+		// a real schema change must still isolate.
+		h.Write([]byte(canonicalJSONBytes(t.Function.Parameters)))
 		h.Write([]byte{0})
 		if t.Function.Strict != nil && *t.Function.Strict {
 			h.Write([]byte("strict=1"))
 			h.Write([]byte{0})
 		}
 	}
-	h.Write([]byte("choice=" + in.ToolChoice))
+	h.Write([]byte("choice=" + canonicalJSONString(in.ToolChoice)))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -136,14 +141,14 @@ func (in KeyInput) SettingsHash() string {
 		b.WriteString("fmt=" + in.FormatType + ";")
 	}
 	if in.FormatSchema != "" {
-		sum := sha256.Sum256([]byte(in.FormatSchema))
+		sum := sha256.Sum256(canonicalJSONBytes(json.RawMessage(in.FormatSchema)))
 		b.WriteString("schema=" + hex.EncodeToString(sum[:]) + ";")
 	}
 	if in.Reasoning != "" {
 		b.WriteString("reason=" + in.Reasoning + ";")
 	}
 	if in.Stop != "" {
-		sum := sha256.Sum256([]byte(in.Stop))
+		sum := sha256.Sum256(canonicalJSONBytes(json.RawMessage(in.Stop)))
 		b.WriteString("stop=" + hex.EncodeToString(sum[:]) + ";")
 	}
 	return b.String()
@@ -229,7 +234,9 @@ func PrefixKey(in KeyInput, length int) string {
 	if len(s) > length {
 		s = s[:length]
 	}
-	h := sha256.Sum256([]byte(in.TenantID + "\x00" + in.APIKeyID + "\x00" + in.Model + "\x00" + s))
+	// The model is lower-cased and trimmed to match ExactKey: "GPT-4o"
+	// and "gpt-4o" are the same model and must share a prefix entry.
+	h := sha256.Sum256([]byte(in.TenantID + "\x00" + in.APIKeyID + "\x00" + strings.ToLower(strings.TrimSpace(in.Model)) + "\x00" + s))
 	return "prefix:" + hex.EncodeToString(h[:])
 }
 
@@ -338,6 +345,35 @@ func formatSchemaHash(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	sum := sha256.Sum256(raw)
+	sum := sha256.Sum256(canonicalJSONBytes(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalJSONBytes re-encodes JSON with sorted keys and no insignificant
+// whitespace, so logically identical payloads (tool arguments, schemas,
+// stop sequences) share a cache key regardless of field order or
+// formatting. Non-JSON input is returned trimmed as-is; it still hashes
+// deterministically, it just does not gain order-insensitivity.
+func canonicalJSONBytes(raw json.RawMessage) []byte {
+	t := strings.TrimSpace(string(raw))
+	if t == "" {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal([]byte(t), &v); err != nil {
+		return []byte(t)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return []byte(t)
+	}
+	return out
+}
+
+// canonicalJSONString canonicalizes a JSON string payload for keying.
+func canonicalJSONString(s string) string {
+	if s == "" {
+		return ""
+	}
+	return string(canonicalJSONBytes(json.RawMessage(s)))
 }

@@ -16,15 +16,17 @@ import {
   useInvalidateCache,
   useUpsertCachePolicy,
 } from '@/hooks/use-admin';
-import { formatDurationMs, formatNumber, formatPercent } from '@/lib/format';
+import { formatCurrency, formatDurationMs, formatNumber, formatPercent } from '@/lib/format';
 
 export function CacheView() {
   const [tenant, setTenant] = React.useState('');
   const [scope, setScope] = React.useState('tenant');
   const [scopeTarget, setScopeTarget] = React.useState('');
+  const [entryModel, setEntryModel] = React.useState('');
+  const [entryProvider, setEntryProvider] = React.useState('');
   const { data, isPending, isError, error, refetch, isFetching } = useCacheStats(tenant);
   const policies = useCachePolicies(tenant);
-  const inspect = useCacheInspect({ tenantId: tenant || undefined, limit: 15 });
+  const inspect = useCacheInspect({ tenantId: tenant || undefined, model: entryModel || undefined, provider: entryProvider || undefined, limit: 15 });
   const invalidations = useCacheInvalidations(tenant);
   const invalidate = useInvalidateCache();
   const upsertPolicy = useUpsertCachePolicy();
@@ -38,6 +40,19 @@ export function CacheView() {
   const bypassEntries = Object.entries(stats?.bypass_by_reason ?? {}).sort((a, b) => b[1] - a[1]);
   const misses = stats?.misses ?? stats?.exact_misses ?? 0;
   const hits = (stats?.exact_hits ?? 0) + (stats?.prefix_hits ?? 0) + (stats?.semantic_hits ?? 0);
+  const totalLookups = hits + misses + (stats?.bypasses ?? 0);
+  const missRate = totalLookups > 0 ? misses / totalLookups : 0;
+  const bypassRate = totalLookups > 0 ? (stats?.bypasses ?? 0) / totalLookups : 0;
+  const tierFlags = [
+    `exact ${config.exact_enabled ? 'on' : 'off'}`,
+    `prefix ${config.prefix_enabled ? 'on' : 'off'}`,
+    `semantic ${config.semantic_enabled ? 'on' : 'off'}`,
+  ].join(' · ');
+  const health = !data?.enabled
+    ? 'disabled'
+    : hits + misses === 0 && (stats?.bypasses ?? 0) === 0
+      ? 'enabled · no traffic yet'
+      : 'enabled · serving';
 
   const flush = () => {
     if (scope === 'tenant') {
@@ -47,7 +62,7 @@ export function CacheView() {
     } else if (scope === 'provider') {
       invalidate.mutate({ scope: 'provider', provider: scopeTarget, tenantId: tenant || undefined });
     } else if (scope === 'key') {
-      invalidate.mutate({ scope: 'key', key: scopeTarget });
+      invalidate.mutate({ scope: 'key', key: scopeTarget, tenantId: tenant || undefined });
     } else {
       invalidate.mutate({ scope: 'all' });
     }
@@ -87,8 +102,14 @@ export function CacheView() {
           <div className="mt-3 grid gap-3 md:grid-cols-4">
             <StatCard label="Reuse count" value={formatNumber(stats?.reuse_count ?? 0)} hint="total served-from-cache" />
             <StatCard label="Latency saved" value={formatDurationMs(stats?.latency_saved_ms ?? 0)} hint="provider time avoided" />
+            <StatCard label="Cost saved" value={formatCurrency(stats?.cost_saved_usd ?? 0)} hint="billed cost avoided by reuse" />
             <StatCard label="Lookup avg" value={formatDurationMs(stats?.lookup_ms_avg ?? 0)} hint="cache lookup time" />
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <StatCard label="Miss rate" value={formatPercent(missRate)} hint={`${formatNumber(misses)} misses of ${formatNumber(totalLookups)} lookups`} />
+            <StatCard label="Bypass rate" value={formatPercent(bypassRate)} hint="streaming, tools, policy, sensitive" />
             <StatCard label="Invalidations" value={formatNumber(stats?.invalidations ?? 0)} hint="flushes this process" />
+            <StatCard label="Cache health" value={health} hint={tierFlags} />
           </div>
         </>
       )}
@@ -172,7 +193,7 @@ export function CacheView() {
           {scope !== 'all' ? (
             <input
               className="h-9 w-64 rounded-md border border-input bg-background px-3 text-sm"
-              placeholder={scope === 'tenant' ? 'tenant id (empty = all)' : `${scope} name or key`}
+              placeholder={scope === 'tenant' ? 'tenant id (empty = all)' : scope === 'key' ? 'exact cache key (tenant filter required)' : `${scope} name or key`}
               value={scopeTarget}
               onChange={(e) => setScopeTarget(e.target.value)}
             />
@@ -286,9 +307,23 @@ export function CacheView() {
         <Card>
           <CardHeader>
             <CardTitle>Recent entries</CardTitle>
-            <CardDescription>Metadata only. Bodies stay in Redis.</CardDescription>
+            <CardDescription>Metadata only. Bodies stay in Redis. Filter by model or provider to slice by serving context.</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-2 flex items-center gap-2">
+              <input
+                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs"
+                placeholder="model filter"
+                value={entryModel}
+                onChange={(e) => setEntryModel(e.target.value)}
+              />
+              <input
+                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs"
+                placeholder="provider filter"
+                value={entryProvider}
+                onChange={(e) => setEntryProvider(e.target.value)}
+              />
+            </div>
             {inspect.isPending ? (
               <TableSkeleton rows={3} columns={3} />
             ) : (inspect.data ?? []).length === 0 ? (
@@ -303,7 +338,7 @@ export function CacheView() {
                       <span className="shrink-0 text-muted-foreground">{e.hit_count + (e.reuse_count ?? 0)} hits</span>
                     </div>
                     <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                      {e.model} · {e.cache_key.slice(-12)}
+                      {e.model}{e.provider ? ` · ${e.provider}` : ''}{e.tenant_id ? ` · tenant ${e.tenant_id.slice(0, 8)}` : ''} · {e.cache_key.slice(-12)}
                     </div>
                   </li>
                 ))}

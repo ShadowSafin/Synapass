@@ -308,13 +308,15 @@ func (r *Recorder) observeMetrics(out RequestOutcome, usage domain.TokenUsage) {
 		} else if out.CacheSimilarity > 0 {
 			r.metrics.ObserveCacheHitDetail(out.TenantID, out.CacheKind, 0, out.CacheSimilarity)
 		}
-	} else {
+	} else if out.CacheBypassReason == "" {
+		// A bypass is not a miss: it never consulted the cache, so it
+		// must not inflate the miss counter the hit-rate math uses.
 		r.metrics.ObserveCacheKind(out.TenantID, "", false)
 	}
 	if out.CacheBypassReason != "" {
 		r.metrics.ObserveCacheBypass(out.TenantID, out.CacheBypassReason)
 	}
-	if out.CacheLookupMS > 0 {
+	if out.CacheLookupMS > 0 || out.CacheBypassReason != "" {
 		outcome := "miss"
 		if out.CacheHit {
 			outcome = "hit"

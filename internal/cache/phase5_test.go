@@ -168,13 +168,18 @@ func TestPolicyBypass(t *testing.T) {
 		in     PolicyInput
 		reason string
 	}{
-		{"streaming", PolicyInput{Stream: true, PolicyUseCache: true}, domain.CacheBypassStreaming},
 		{"sensitive", PolicyInput{Sensitive: true, PolicyUseCache: true}, domain.CacheBypassSensitive},
 		{"policy_off", PolicyInput{PolicyUseCache: false}, domain.CacheBypassPolicyDisabled},
 		{"tools", PolicyInput{PolicyUseCache: true, HasTools: true, ToolsSafe: false}, domain.CacheBypassToolRequest},
 		{"nondet", PolicyInput{PolicyUseCache: true, Temperature: &hot}, domain.CacheBypassNondeterministic},
 		{"multi", PolicyInput{PolicyUseCache: true, N: 2}, domain.CacheBypassMultiSample},
 		{"images", PolicyInput{PolicyUseCache: true, HasImages: true}, domain.CacheBypassMultimodal},
+	}
+	// Streams are first-class cache citizens: a hit replays as SSE and a
+	// clean completion is stored, so streaming no longer bypasses.
+	zeroStream := 0.0
+	if got := Evaluate(PolicyInput{Stream: true, PolicyUseCache: true, Temperature: &zeroStream}, cfg); !got.Cacheable {
+		t.Fatalf("streaming deterministic request must be cacheable, got %+v", got)
 	}
 	for _, tc := range cases {
 		if got := Evaluate(tc.in, cfg); got.Cacheable || got.BypassReason != tc.reason {

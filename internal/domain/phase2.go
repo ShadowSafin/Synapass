@@ -338,6 +338,10 @@ type CacheStats struct {
 	Invalidations  int64            `json:"invalidations,omitempty"`
 	ReuseCount     int64            `json:"reuse_count,omitempty"`
 	LatencySavedMS int64            `json:"latency_saved_ms,omitempty"`
+	// CostSavedUSD accumulates the stored serving cost of reused answers:
+	// each hit adds the original request's billed cost, which is the
+	// standing delta the cache avoided re-spending.
+	CostSavedUSD   float64          `json:"cost_saved_usd,omitempty"`
 	LookupMSAvg    float64          `json:"lookup_ms_avg,omitempty"`
 	TopPrompts     []CacheTopPrompt `json:"top_prompts,omitempty"`
 }

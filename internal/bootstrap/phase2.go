@@ -262,10 +262,16 @@ func (a *CacheAdapter) Store(ctx context.Context, tenant, model string, req *dom
 
 // LookupFull implements api.ResponseCacheService with the full Phase 5 key.
 func (a *CacheAdapter) LookupFull(ctx context.Context, tenantID, apiKeyID, model string, req *domain.ChatCompletionRequest, policyID string, policyVersion int, endpointID, sensitivity, user string) domain.CacheLookupResult {
+	return a.LookupFullWithTiers(ctx, tenantID, apiKeyID, model, req, policyID, policyVersion, endpointID, sensitivity, user, true, true, true, 0)
+}
+
+// LookupFullWithTiers implements api.ResponseCacheService with per-request
+// tier enforcement.
+func (a *CacheAdapter) LookupFullWithTiers(ctx context.Context, tenantID, apiKeyID, model string, req *domain.ChatCompletionRequest, policyID string, policyVersion int, endpointID, sensitivity, user string, allowExact, allowPrefix, allowSemantic bool, semThreshold float64) domain.CacheLookupResult {
 	if a == nil || a.Inner == nil {
 		return domain.CacheLookupResult{Hit: false, BypassReason: "cache_disabled"}
 	}
-	return a.Inner.Lookup(ctx, fullKeyInput(tenantID, apiKeyID, model, req, policyID, policyVersion, endpointID, sensitivity, user), false, "", false)
+	return a.Inner.LookupWithTiers(ctx, fullKeyInput(tenantID, apiKeyID, model, req, policyID, policyVersion, endpointID, sensitivity, user), false, "", false, allowExact, allowPrefix, allowSemantic, semThreshold)
 }
 
 // StoreFull implements api.ResponseCacheService with serving metadata.
@@ -273,7 +279,11 @@ func (a *CacheAdapter) StoreFull(ctx context.Context, tenantID, apiKeyID, model 
 	if a == nil || a.Inner == nil {
 		return ""
 	}
-	return a.Inner.StoreResponseWithMeta(ctx, fullKeyInput(tenantID, apiKeyID, model, req, meta.PolicyID, meta.PolicyVersion, meta.EndpointID, "", ""), body, false, meta)
+	// Sensitivity and user scope the exact key, so they must match the
+	// lookup path exactly: LookupFull builds its key from the request's
+	// live sensitivity/user, and the store must use the same values or
+	// scoped traffic would never hit (and scopes would blur).
+	return a.Inner.StoreResponseWithMeta(ctx, fullKeyInput(tenantID, apiKeyID, model, req, meta.PolicyID, meta.PolicyVersion, meta.EndpointID, meta.Sensitivity, meta.User), body, false, meta)
 }
 
 // Evaluate implements api.ResponseCacheService policy decisions.
@@ -329,6 +339,14 @@ func (a *CacheAdapter) Stats() domain.CacheStats {
 		return domain.CacheStats{}
 	}
 	return a.Inner.Stats()
+}
+
+// RecordBypass implements api.ResponseCacheService.
+func (a *CacheAdapter) RecordBypass(reason string) {
+	if a == nil || a.Inner == nil {
+		return
+	}
+	a.Inner.RecordBypass(reason)
 }
 
 // InvalidateTenant implements api.ResponseCacheService.

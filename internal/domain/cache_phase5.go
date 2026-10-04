@@ -123,6 +123,19 @@ type CacheHitMeta struct {
 	PolicyVersion int     `json:"policy_version,omitempty"`
 	EndpointID  string    `json:"endpoint_id,omitempty"`
 	ToolsHash   string    `json:"tools_hash,omitempty"`
+	// SettingsHash covers generation settings and the response contract
+	// (temperature, top-p, seed, max tokens, response format, stop, ...).
+	// A settings change turns a would-be hit into a miss.
+	SettingsHash string   `json:"settings_hash,omitempty"`
+	// Sensitivity is the request sensitivity label the entry was stored
+	// under. Labels isolate entries exactly like tenants do.
+	Sensitivity string    `json:"sensitivity,omitempty"`
+	// User is the end-user identifier the entry was stored under.
+	User        string    `json:"user,omitempty"`
+	// APIKeyID is the calling key the entry was stored under. Exact keys
+	// already hash it; this field lets the prefix/semantic validators
+	// enforce the same isolation for non-exact tiers.
+	APIKeyID    string    `json:"api_key_id,omitempty"`
 	PromptHash  string    `json:"prompt_hash"`
 	Usage       TokenUsage `json:"usage,omitempty"`
 	CostUSD     float64   `json:"cost_usd,omitempty"`

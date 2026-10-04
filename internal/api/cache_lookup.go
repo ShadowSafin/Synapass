@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/shadowsafin/synapass/internal/cache"
@@ -22,17 +23,21 @@ func (s *Server) cacheLookup(
 	policy *domain.RoutingPolicy,
 	toolCtx *toolContext,
 ) (*domain.CacheLookupResult, *domain.CacheDecision) {
-	if s.cache == nil || !s.cache.Enabled() || rc.Stream {
-		var reason string
-		if rc.Stream {
-			reason = domain.CacheBypassStreaming
-		}
-		dec := &domain.CacheDecision{Cacheable: false, BypassReason: reason}
+	// Bypass accounting lives in exactly two places: the in-process
+	// Cache.Stats (via RecordBypass, served by the dashboard) and the
+	// Prometheus counters (via the recorder at outcome time). Nothing is
+	// emitted here so a hit is not counted once at lookup and again at
+	// record time.
+	//
+	// Streams are looked up like any other request: a hit replays as SSE
+	// and a clean completion is stored. There is no streaming bypass.
+	if s.cache == nil || !s.cache.Enabled() {
+		dec := &domain.CacheDecision{Cacheable: false, BypassReason: domain.CacheBypassDisabled}
 		rc.CacheDecision = dec
-		if s.metrics != nil && reason != "" {
-			s.metrics.ObserveCacheBypass(rc.TenantID(), reason)
+		if s.cache != nil {
+			s.cache.RecordBypass(domain.CacheBypassDisabled)
 		}
-		return &domain.CacheLookupResult{Hit: false, BypassReason: reason}, dec
+		return &domain.CacheLookupResult{Hit: false, BypassReason: domain.CacheBypassDisabled}, dec
 	}
 
 	sensitive, sensitivity := cache.SensitivityOf(rc.DataSensitivity)
@@ -82,37 +87,26 @@ func (s *Server) cacheLookup(
 	}
 	rc.CacheDecision = &dec
 	if !dec.Cacheable {
-		if s.metrics != nil {
-			s.metrics.ObserveCacheBypass(rc.TenantID(), dec.BypassReason)
-		}
+		s.cache.RecordBypass(dec.BypassReason)
 		return &domain.CacheLookupResult{Hit: false, BypassReason: dec.BypassReason}, &dec
 	}
 
-	start := time.Now()
-	lookup := s.cache.LookupFull(ctx, rc.TenantID(), rc.APIKeyID(), body.Model,
-		body, policyID, policyVersion, rc.EndpointID, sensitivity, body.User)
-	// Enforce per-scope tier/threshold overrides post-lookup: the shared
-	// lookup uses global tiers, so a rule that disables one turns the hit
-	// into a miss rather than serving it.
-	if lookup.Hit && matched != nil && !tierAllowed(lookup.Kind, matched, dec) {
-		lookup = domain.CacheLookupResult{Hit: false, BypassReason: domain.CacheBypassPolicyDisabled}
+	// Tier allowances combine the global decision with the most specific
+	// durable rule: a rule that disables a tier turns its entries into
+	// misses before any store read, so the counters never record a hit
+	// that was never served.
+	allowExact, allowPrefix, allowSemantic := dec.AllowExact, dec.AllowPrefix, dec.AllowSemantic
+	semThreshold := 0.0
+	if matched != nil {
+		allowSemantic = tierAllowed(domain.CacheSemantic, matched, dec)
+		allowPrefix = tierAllowed(domain.CachePrefix, matched, dec)
+		allowExact = tierAllowed(domain.CacheExact, matched, dec)
+		semThreshold = matched.Threshold
 	}
-	if lookup.Hit && lookup.Kind == domain.CacheSemantic && matched != nil && matched.Threshold > 0 && lookup.Similarity < matched.Threshold {
-		lookup = domain.CacheLookupResult{Hit: false, BypassReason: domain.CacheBypassPolicyDisabled}
-	}
+	lookup := s.cache.LookupFullWithTiers(ctx, rc.TenantID(), rc.APIKeyID(), body.Model,
+		body, policyID, policyVersion, rc.EndpointID, sensitivity, body.User,
+		allowExact, allowPrefix, allowSemantic, semThreshold)
 	rc.CacheLookupMS = lookup.LookupMS
-	if s.metrics != nil {
-		if lookup.Hit {
-			s.metrics.ObserveCacheKind(rc.TenantID(), string(lookup.Kind), true)
-			s.metrics.ObserveCacheLookup(rc.TenantID(), "hit", lookup.LookupMS/1000)
-			s.metrics.ObserveCacheHitDetail(rc.TenantID(), string(lookup.Kind),
-				float64(lookup.LatencySavedMS)/1000, lookup.Similarity)
-		} else {
-			s.metrics.ObserveCacheKind(rc.TenantID(), "", false)
-			s.metrics.ObserveCacheLookup(rc.TenantID(), "miss", lookup.LookupMS/1000)
-		}
-	}
-	_ = start
 	lookup.Trace = &domain.CacheTrace{
 		Hit: lookup.Hit, Kind: string(lookup.Kind), Key: lookup.Key,
 		LookupMS: lookup.LookupMS, Similarity: lookup.Similarity,
@@ -140,20 +134,24 @@ func (s *Server) cacheStore(
 	if s.cache == nil || !s.cache.Enabled() {
 		return
 	}
-	if rc.Stream || rc.CacheBypass {
+	// No stream exclusion: a cleanly completed stream is a complete
+	// response. storeCompletedStream already proved completion; the
+	// decision and sensitivity gates below are the remaining guards.
+	if rc.CacheBypass {
 		return
 	}
 	dec := rc.CacheDecision
 	if dec == nil || !dec.Cacheable {
 		return
 	}
-	sensitive, _ := cache.SensitivityOf(rc.DataSensitivity)
+	sensitive, sensitivityLabel := cache.SensitivityOf(rc.DataSensitivity)
 	if sensitive {
 		return
 	}
 	meta := domain.CacheHitMeta{
 		Model: model, Provider: provider, PolicyID: policyID,
 		PolicyVersion: policyVersion, EndpointID: rc.EndpointID,
+		Sensitivity: sensitivityLabel, User: body.User,
 		Usage: usage, CostUSD: costUSD, ProviderLatencyMS: providerLatencyMS,
 	}
 	if dec != nil && dec.TTLSeconds > 0 {
@@ -184,7 +182,10 @@ func safeRegistryNames(toolCtx *toolContext) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range toolCtx.Registry.All() {
 		// Only deterministic read-only built-ins are safe to reuse.
-		out[t.Name] = t.SafetyLevel == domain.SafetySafe && t.Executable
+		// "now" is read-only but time-dependent: an answer built on the
+		// current time goes stale immediately, so it is never safe.
+		safe := t.Executable && t.SafetyLevel == domain.SafetySafe && !strings.EqualFold(t.Name, "now")
+		out[t.Name] = safe
 	}
 	return out
 }

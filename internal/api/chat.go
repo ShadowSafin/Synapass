@@ -235,6 +235,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			s.serveCacheHit(w, rc, policy, *lookup, shapedBody, debugRequested(r))
 			return
 		}
+	} else {
+		// No cache to consult: name the bypass so metrics, traces and
+		// the dashboard record a bypass rather than a miss. A miss
+		// means "looked and found nothing"; this looked at nothing.
+		rc.CacheDecision = &domain.CacheDecision{Cacheable: false, BypassReason: domain.CacheBypassDisabled}
 	}
 
 	decision, err := s.engine.Resolve(ctx, rc)
@@ -410,6 +415,11 @@ func (s *Server) runCompletion(
 			return err
 		}
 		logTruncation(s.logger, s.metrics, rc, decision, completion, "")
+		// A cleanly completed stream is a complete response like any
+		// other: store it when the request's cache decision allows it.
+		// Failed and client-aborted streams return through respondError,
+		// never through here, so the cache cannot learn them.
+		s.storeCompletedStream(ctx, rc, decision, body, result, usage, cost, elapsed, debug)
 	} else {
 		response := s.buildResponse(result.Response, rc, decision, result, usage, cost, elapsed, debug)
 		// A requested response_format is a contract, checked here rather than
@@ -465,8 +475,17 @@ func (s *Server) serveCacheHit(w http.ResponseWriter, rc *domain.RequestContext,
 	// Cached body is a full ChatCompletionResponse.
 	var cached domain.ChatCompletionResponse
 	if err := json.Unmarshal(lookup.Body, &cached); err != nil {
-		// Corrupt cache entry: fall through to live execution would require
-		// restructuring; instead return the raw bytes with cache metadata.
+		// Corrupt cache entry: it fails closed by serving the stored
+		// bytes verbatim with cache metadata rather than failing the
+		// request, and it is logged so the corruption is visible. The
+		// entry expires via its TTL; it is never re-stored.
+		if s.logger != nil {
+			s.logger.Warn("serving corrupt cache entry verbatim",
+				"request_id", rc.RequestID.String(),
+				"cache_key", lookup.Key,
+				"cache_kind", string(lookup.Kind),
+			)
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("X-Synapass-Cache", string(lookup.Kind))
 		w.WriteHeader(http.StatusOK)
@@ -486,18 +505,127 @@ func (s *Server) serveCacheHit(w http.ResponseWriter, rc *domain.RequestContext,
 		m.CacheSimilarity = lookup.Similarity
 		m.CacheReuseCount = lookup.ReuseCount
 	}, debug)
+	if rc.Stream {
+		// A streaming client asked for SSE, so the stored answer replays
+		// as SSE: one content frame carrying the routing metadata, one
+		// terminal frame, the usage frame when asked for, then [DONE].
+		// The bytes differ from a live stream; the content does not.
+		s.serveCacheHitStream(w, rc, cached, lookup, body, debug)
+		return
+	}
 	writeJSON(w, http.StatusOK, cached)
 	bctx, cancel := bookkeepingContext()
 	defer cancel()
 	s.recordCacheOutcome(bctx, rc, policy, lookup, time.Since(started))
-	if s.metrics != nil {
-		s.metrics.ObserveCacheKind(rc.TenantID(), string(lookup.Kind), true)
-		s.metrics.ObserveCacheHitDetail(rc.TenantID(), string(lookup.Kind),
-			float64(lookup.LatencySavedMS)/1000, lookup.Similarity)
-	}
+	// Prometheus cache counters are emitted once by the recorder inside
+	// recordCacheOutcome; emitting them here too would double-count hits.
 	// Bump the durable reuse counter best-effort.
 	if s.repos != nil && s.repos.CacheEntries != nil && lookup.Key != "" {
-		s.repos.CacheEntries.BumpHit(bctx, lookup.Key)
+		s.repos.CacheEntries.BumpHit(bctx, cacheEntryKey(rc.TenantID(), lookup.Key))
+	}
+}
+
+// cacheEntryKey maps a lookup key back to the entry key stored by
+// UpsertMeta. Lookups carry the tenant-namespaced form
+// ("tenant:<id>:exact:<hash>"); the metadata row is keyed by the bare form
+// ("exact:<hash>"), so the namespace must be stripped or the bump — and
+// with it the dashboard top-prompts ranking — silently misses every row.
+func cacheEntryKey(tenantID, lookupKey string) string {
+	if tenantID != "" {
+		if bare := strings.TrimPrefix(lookupKey, "tenant:"+tenantID+":"); bare != lookupKey {
+			return bare
+		}
+	}
+	return lookupKey
+}
+
+// serveCacheHitStream replays a cached response to a streaming client.
+//
+// The stored body is a full ChatCompletionResponse; the replay renders it
+// as the same SSE shape a live stream would have produced: a content frame
+// carrying the routing metadata, a terminal frame, the usage frame when
+// asked for, then [DONE]. A failure to establish the stream fails the
+// request rather than silently downgrading it to JSON, because the client
+// is parsing events.
+func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestContext, cached domain.ChatCompletionResponse, lookup domain.CacheLookupResult, body *domain.ChatCompletionRequest, debug bool) {
+	started := rc.ReceivedAt
+	if started.IsZero() {
+		started = time.Now()
+	}
+	w.Header().Set("X-Synapass-Cache", string(lookup.Kind))
+	sse, err := newSSEWriter(w)
+	if err != nil {
+		writeError(w, err, publicMetaFrom(rc, nil, debug))
+		bctx, cancel := bookkeepingContext()
+		defer cancel()
+		s.recordCacheOutcome(bctx, rc, nil, lookup, time.Since(started))
+		return
+	}
+	content := ""
+	if len(cached.Choices) > 0 && cached.Choices[0].Message != nil {
+		content = cached.Choices[0].Message.Content.PlainText()
+	}
+	model := firstNonEmptyString(cached.Model, rc.RequestedModel)
+	created := cached.Created
+	if created == 0 {
+		created = time.Now().Unix()
+	}
+	meta := publicMetaFrom(rc, func(m *domain.ResponseMetadata) {
+		m.CacheHit = true
+		m.CacheKind = string(lookup.Kind)
+		m.RoutedModel = model
+		m.RequestedModel = rc.RequestedModel
+		m.Task = string(rc.Task.Task)
+		m.Attempts = 0
+		m.CacheSimilarity = lookup.Similarity
+		m.CacheReuseCount = lookup.ReuseCount
+	}, debug)
+	delta := domain.ChatMessage{Role: domain.RoleAssistant, Content: domain.NewTextContent(content)}
+	stop := domain.FinishStop
+	frames := []domain.ChatCompletionChunk{
+		{
+			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object: domain.ObjectChatCompletionChunk,
+			Created: created,
+			Model: model,
+			SystemFingerprint: cached.SystemFingerprint,
+			Choices: []domain.Choice{{Index: 0, Delta: &delta}},
+			Synapass: meta,
+		},
+		{
+			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object: domain.ObjectChatCompletionChunk,
+			Created: created,
+			Model: model,
+			Choices: []domain.Choice{{Index: 0, FinishReason: &stop}},
+		},
+	}
+	for _, frame := range frames {
+		if werr := sse.WriteEvent(frame); werr != nil {
+			// Client went away mid-replay: the hit was still served from
+			// cache, so it is recorded, not turned into an error.
+			break
+		}
+	}
+	if body != nil && body.StreamOptions != nil && body.StreamOptions.IncludeUsage && cached.Usage != nil {
+		usageCopy := *cached.Usage
+		if werr := sse.WriteEvent(domain.ChatCompletionChunk{
+			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object: domain.ObjectChatCompletionChunk,
+			Created: created,
+			Model: model,
+			Choices: []domain.Choice{},
+			Usage: &usageCopy,
+		}); werr != nil {
+			_ = werr
+		}
+	}
+	_ = sse.WriteDone()
+	bctx, cancel := bookkeepingContext()
+	defer cancel()
+	s.recordCacheOutcome(bctx, rc, nil, lookup, time.Since(started))
+	if s.repos != nil && s.repos.CacheEntries != nil && lookup.Key != "" {
+		s.repos.CacheEntries.BumpHit(bctx, cacheEntryKey(rc.TenantID(), lookup.Key))
 	}
 }
 
@@ -541,7 +669,7 @@ func (s *Server) recordCacheOutcome(ctx context.Context, rc *domain.RequestConte
 		CacheSimilarity: lookup.Similarity,
 		CacheReuseCount: lookup.ReuseCount,
 		CacheLatencySavedMS: lookup.LatencySavedMS,
-		Streaming:      false,
+		Streaming:      rc.Stream,
 		Status:         http.StatusOK,
 		Outcome:        domain.OutcomeSuccess,
 		ClientIP:       rc.ClientIP,
@@ -782,6 +910,103 @@ func servingTarget(decision *domain.RouteDecision, result *routing.ExecuteResult
 		}
 	}
 	return provider, model, fallbackUsed, attempts
+}
+
+// streamResponseStorable reports whether an assembled stream response may
+// be cached.
+//
+// The decisive signal is that Execute succeeded: every adapter only returns
+// success on a clean end of stream (EOF or [DONE]); read failures,
+// timeouts and client disconnects all return errors, which travel through
+// respondError and never reach the store. A missing finish reason therefore
+// means "the provider closed a healthy stream", not "the stream is
+// incomplete" — several OpenAI-compatible providers never send one, and
+// requiring it would silently disable stream caching for them.
+//
+// What is still rejected: empty content, over-limit bodies, tool-call
+// answers (their arguments arrive fragmented and their results live outside
+// the cache key), and explicit failure finishes (error, content filter).
+func streamResponseStorable(resp *providers.Response, maxBytes int) bool {
+	if resp == nil {
+		return false
+	}
+	content := resp.Content()
+	if content == "" {
+		return false
+	}
+	if maxBytes > 0 && len(content) > maxBytes {
+		return false
+	}
+	for _, ch := range resp.Choices {
+		if ch.Message != nil && len(ch.Message.ToolCalls) > 0 {
+			return false
+		}
+	}
+	switch resp.FinishReason() {
+	case "", domain.FinishStop, domain.FinishLength:
+		return true
+	default:
+		return false
+	}
+}
+
+// storeCompletedStream writes a cleanly finished stream into the cache in
+// the same envelope shape as a non-streaming response, so later identical
+// requests hit regardless of which transport they use.
+func (s *Server) storeCompletedStream(
+	ctx context.Context,
+	rc *domain.RequestContext,
+	decision *domain.RouteDecision,
+	body domain.ChatCompletionRequest,
+	result *routing.ExecuteResult,
+	usage domain.TokenUsage,
+	cost domain.Cost,
+	elapsed time.Duration,
+	debug bool,
+) {
+	if s.cache == nil || !s.cache.Enabled() {
+		return
+	}
+	if rc.CacheDecision == nil || !rc.CacheDecision.Cacheable {
+		return
+	}
+	if result == nil || result.Response == nil {
+		return
+	}
+	maxBytes := 0
+	if s.config != nil {
+		maxBytes = s.config.Cache.MaxResponseBytes
+	}
+	if !streamResponseStorable(result.Response, maxBytes) {
+		return
+	}
+	content := result.Response.Content()
+	// A requested response_format is a contract: a completion that
+	// violates it is served (the stream already went out) but never
+	// stored, so the violation cannot be re-served from cache.
+	if rc.StructuredOutput.Mode != domain.FormatNone {
+		structured := validateStructuredOutput(rc.StructuredOutput, content, false)
+		if structured != nil && structured.Valid != nil && !*structured.Valid {
+			return
+		}
+	}
+	response := s.buildResponse(result.Response, rc, decision, result, usage, cost, elapsed, debug)
+	if payload, merr := jsonMarshal(response); merr == nil {
+		servedBy, servedModel, _, _ := servingTarget(decision, result)
+		policyID, policyVersion := "", 0
+		if decision != nil {
+			policyID = decision.PolicyID
+		}
+		if rc.PolicyDecision != nil && rc.PolicyDecision.PolicyID != "" {
+			policyID = rc.PolicyDecision.PolicyID
+			policyVersion = rc.PolicyDecision.PolicyVersion
+		}
+		if servedModel == "" {
+			servedModel = body.Model
+		}
+		s.cacheStore(ctx, rc, &body, payload, servedBy, servedModel,
+			policyID, policyVersion, usage, cost.USD, result.ProviderLatencyMS)
+	}
 }
 
 // streamHandler renders provider chunks as OpenAI-compatible SSE frames.

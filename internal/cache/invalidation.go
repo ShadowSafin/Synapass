@@ -3,7 +3,15 @@ package cache
 import (
 	"context"
 	"strings"
+
+	"github.com/shadowsafin/synapass/internal/domain"
 )
+
+// errKeyScopeNeedsTenant is returned when a key flush cannot address any
+// entry: exact keys live under tenant namespaces, so the tenant is
+// required to name them.
+var errKeyScopeNeedsTenant = domain.NewError(domain.ErrCodeInvalidRequest,
+	"a key-scope invalidation requires tenant_id: exact keys live under tenant namespaces")
 
 // InvalidateScope describes one flush operation. TenantID is required for
 // tenant/model/provider scopes; empty means global (admin "flush all").
@@ -80,28 +88,69 @@ func (c *Cache) Invalidate(ctx context.Context, scope InvalidateScope) (int, err
 		c.mu.Unlock()
 		return removed, nil
 	case "key":
-		if c.store != nil && scope.Key != "" {
-			// Exact-key flush: delete the tenant-namespaced variants plus the
-			// legacy bare key for compatibility.
-			for _, k := range []string{scope.Key, "tenant:" + scope.TenantID + ":" + scope.Key} {
-				if k == "" || k == "tenant::" {
-					continue
+		// Exact keys are tenant-namespaced in the store, so a key flush
+		// without a tenant cannot address any live entry: failing here
+		// is honest, while deleting nothing and reporting success would
+		// leave operators believing a key was flushed when it was not.
+		if scope.TenantID == "" || scope.Key == "" {
+			return 0, errKeyScopeNeedsTenant
+		}
+		// Resolve both key forms: the dashboard may name the bare
+		// "exact:<hash>" or the namespaced "tenant:<id>:exact:<hash>".
+		forms := map[string]bool{scope.Key: true}
+		nsForm := "tenant:" + scope.TenantID + ":" + strings.TrimPrefix(scope.Key, "tenant:"+scope.TenantID+":")
+		forms[nsForm] = true
+		c.mu.Lock()
+		var tierKeys []string
+		seen := map[string]bool{}
+		for f := range forms {
+			if ref, ok := c.keyIndex[f]; ok {
+				for _, sk := range ref.storeKeys {
+					if !seen[sk] {
+						seen[sk] = true
+						tierKeys = append(tierKeys, sk)
+					}
 				}
-				if _, err := c.store.DeletePrefix(ctx, "response:"+k); err != nil {
-					return removed, err
-				}
-				removed++
+				delete(c.keyIndex, f)
 			}
 		}
-		c.mu.Lock()
-		for k := range c.memIndex {
-			if scope.Key != "" && strings.Contains(k, scope.Key) {
+		// Fallback sweep for entries the reverse index no longer holds
+		// (evicted under pressure): any semantic entry derived from the
+		// same logical request shares its exact key.
+		wantExact := strings.TrimPrefix(scope.Key, "tenant:"+scope.TenantID+":")
+		for k, e := range c.memIndex {
+			if e.tenant != "" && e.tenant != scope.TenantID {
+				continue
+			}
+			if ExactKey(e.input) == wantExact {
+				if !seen[e.nsKey] {
+					seen[e.nsKey] = true
+					tierKeys = append(tierKeys, e.nsKey)
+				}
 				delete(c.memIndex, k)
 				removed++
 			}
 		}
 		c.stats.Invalidations++
 		c.mu.Unlock()
+		if c.store != nil {
+			for _, sk := range tierKeys {
+				n, err := c.store.DeletePrefix(ctx, "response:"+sk)
+				removed += n
+				if err != nil {
+					return removed, err
+				}
+			}
+			// Legacy bare exact keys predate namespacing; delete them for
+			// compatibility when the reverse index knew nothing about them.
+			if len(tierKeys) == 0 {
+				n, err := c.store.DeletePrefix(ctx, "response:"+wantExact)
+				removed += n
+				if err != nil {
+					return removed, err
+				}
+			}
+		}
 		return removed, nil
 	case "model", "provider":
 		// Model/provider changes cannot be mapped to key hashes without an

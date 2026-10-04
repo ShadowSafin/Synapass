@@ -52,9 +52,17 @@ type ResponseCacheService interface {
 	Lookup(ctx context.Context, tenant, model string, req *domain.ChatCompletionRequest, bypass bool, bypassReason string, sensitive bool) domain.CacheLookupResult
 	Store(ctx context.Context, tenant, model string, req *domain.ChatCompletionRequest, body []byte, sensitive bool) string
 	LookupFull(ctx context.Context, tenantID, apiKeyID, model string, req *domain.ChatCompletionRequest, policyID string, policyVersion int, endpointID, sensitivity, user string) domain.CacheLookupResult
+	// LookupFullWithTiers is LookupFull with per-request tier enforcement
+	// (scoped policy overrides) applied before any store read, so a
+	// tier-disabled entry is a miss rather than a downgraded hit.
+	LookupFullWithTiers(ctx context.Context, tenantID, apiKeyID, model string, req *domain.ChatCompletionRequest, policyID string, policyVersion int, endpointID, sensitivity, user string, allowExact, allowPrefix, allowSemantic bool, semThreshold float64) domain.CacheLookupResult
 	StoreFull(ctx context.Context, tenantID, apiKeyID, model string, req *domain.ChatCompletionRequest, body []byte, meta domain.CacheHitMeta) string
 	Evaluate(in domain.CacheEvalInput) domain.CacheDecision
 	Stats() domain.CacheStats
+	// RecordBypass records a bypass decided outside Lookup (streaming,
+	// policy-disabled, cache-disabled) so the in-process dashboard
+	// counters agree with the request flow.
+	RecordBypass(reason string)
 	InvalidateTenant(ctx context.Context, tenantID string) (int, error)
 	InvalidateScope(ctx context.Context, scope, tenantID, model, provider, key, reason string) (int, error)
 }

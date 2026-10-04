@@ -652,6 +652,7 @@ export interface CacheStats {
   invalidations?: number;
   reuse_count?: number;
   latency_saved_ms?: number;
+  cost_saved_usd?: number;
   lookup_ms_avg?: number;
   top_prompts?: CacheTopPrompt[];
 }
