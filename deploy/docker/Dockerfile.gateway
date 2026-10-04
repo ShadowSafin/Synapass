@@ -12,7 +12,14 @@
 # not cosmetic: a newer toolchain silently changes language semantics, and GOTOOLCHAIN
 # is fixed to local so a build cannot quietly download a different compiler than
 # the one CI validated.
-FROM golang:1.27-alpine AS builder
+#
+# Multi-arch: the builder runs natively (BUILDPLATFORM) and cross-compiles to
+# TARGETARCH, so `docker buildx build --platform linux/arm64` (e.g. for an
+# ARM64 VPS: Graviton, Ampere, Oracle ARM) produces a working binary from an
+# amd64 laptop and vice versa. A plain `docker compose up --build` on the VPS
+# itself also works: BuildKit sets TARGETARCH to the host arch automatically.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
+ARG TARGETARCH
 
 ENV GOTOOLCHAIN=local \
     CGO_ENABLED=0 \
@@ -35,7 +42,12 @@ ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG DIRTY=""
 
-RUN go build \
+# GOARCH comes from TARGETARCH (amd64/arm64 under BuildKit). When TARGETARCH is
+# empty (plain `docker build` without buildx) GOARCH is left unset so the Go
+# toolchain falls back to the builder's native arch, which is the correct
+# behaviour for a native `docker compose up --build` on either amd64 or arm64.
+RUN if [ -n "${TARGETARCH:-}" ]; then export GOARCH="${TARGETARCH}"; fi; \
+      go build \
       -trimpath \
       -ldflags "-s -w \
         -X github.com/shadowsafin/synapass/internal/version.Version=${VERSION} \
@@ -66,11 +78,22 @@ RUN apk add --no-cache ca-certificates tzdata \
 # is pinned so image rebuilds are reproducible; bump the ARG deliberately, not
 # by floating on latest. The binary is owned by root and executable but not
 # writable, like the gateway binary itself.
+#
+# Multi-arch: cloudflared ships per-arch binaries (cloudflared-linux-amd64 /
+# cloudflared-linux-arm64). The old hardcoded amd64 URL broke every ARM64 host
+# with an exec-format error, so the arch is resolved from TARGETARCH.
 ARG CLOUDFLARED_VERSION=2026.9.3
-RUN wget -q -O /usr/local/bin/cloudflared \
-      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
- && chmod 0555 /usr/local/bin/cloudflared \
- && /usr/local/bin/cloudflared --version
+ARG TARGETARCH
+RUN set -eux; \
+  case "${TARGETARCH:-amd64}" in \
+    amd64) CLOUDFLARED_ARCH="amd64" ;; \
+    arm64) CLOUDFLARED_ARCH="arm64" ;; \
+    *) echo "unsupported TARGETARCH=${TARGETARCH} (want amd64 or arm64)" >&2; exit 1 ;; \
+  esac; \
+  wget -q -O /usr/local/bin/cloudflared \
+    "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${CLOUDFLARED_ARCH}"; \
+  chmod 0555 /usr/local/bin/cloudflared; \
+  /usr/local/bin/cloudflared --version
 
 # The example config is shipped as the image's starting point. It is named
 # config.yaml because that is one of the loader's default search paths

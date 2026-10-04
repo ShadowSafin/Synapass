@@ -4,6 +4,24 @@
 # gateway, the intelligence workers, the dashboard and the full observability
 # chain. `docker compose up` produces a working installation, not a demo.
 #
+# ARM64 / amd64: this stack deploys on both. No `platform:` is pinned anywhere
+# on purpose -- every third-party image below (postgres, redis, clickhouse,
+# nats, otel-collector, prometheus, loki, promtail, grafana) is multi-arch, and
+# the locally built services (gateway, workers, dashboard) are multi-arch too:
+# their Dockerfiles build from multi-arch bases (golang, alpine, node, python)
+# and the gateway resolves the cloudflared binary + GOARCH from TARGETARCH.
+#   * Native on the VPS (simplest): `docker compose up --build -d` on the ARM64
+#     host. BuildKit sets TARGETARCH automatically, so the right arch is built.
+#   * Cross-built from an amd64 laptop: `docker buildx build --platform
+#     linux/arm64 ...` or `DOCKER_DEFAULT_PLATFORM=linux/arm64 docker compose
+#     build`. The gateway Dockerfile uses `--platform=$BUILDPLATFORM` for the
+#     builder stage and cross-compiles Go to TARGETARCH.
+#   * ClickHouse ARM requirement: the arm64 image needs ARMv8.2-A + RCpc
+#     (Graviton >= 2, Ampere Altra, Oracle ARM -- all fine). Raspberry Pi 4 /
+#     older ARMv8.0 boards are NOT supported by ClickHouse and will crash.
+#   * Give the VPS >= 4 GB RAM: ClickHouse + Prometheus + Grafana are the heavy
+#     part, on either arch.
+#
 # Design notes
 #
 #   * Health checks gate every dependency, so the gateway does not start against a
@@ -168,6 +186,12 @@ services:
       SYNAPASS_OTEL_ENDPOINT: otel-collector:4318
       SYNAPASS_OTEL_INSECURE: "true"
       SYNAPASS_PROMETHEUS_ENABLED: "true"
+      # Response-cache tiers. The exact tier needs both switches; prefix and
+      # semantic follow the shipped config defaults unless overridden here.
+      # These must be listed explicitly: compose only injects variables that
+      # are interpolated below, so a bare `.env` entry would be ignored.
+      SYNAPASS_CACHE_RESPONSE_ENABLED: ${SYNAPASS_CACHE_RESPONSE_ENABLED:-false}
+      SYNAPASS_CACHE_EXACT_ENABLED: ${SYNAPASS_CACHE_EXACT_ENABLED:-true}
       SYNAPASS_LOG_FORMAT: json
       # The dashboard origin must be allowed explicitly; a wildcard is refused in
       # production by configuration validation.
