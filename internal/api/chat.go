@@ -36,6 +36,23 @@ const (
 	headerNoCache         = "X-Synapass-No-Cache"
 )
 
+// headerThinking signals that a non-streaming response carries a thinking
+// trace (reasoning_content on a message). Streams cannot carry it: headers
+// are committed before the first chunk arrives, while thinking arrives
+// mid-stream. Stream clients detect thinking by the presence of
+// delta.reasoning_content frames instead.
+const headerThinking = "X-Synapass-Thinking"
+
+// responseHasReasoning reports whether any choice carries a thinking trace.
+func responseHasReasoning(resp domain.ChatCompletionResponse) bool {
+	for _, ch := range resp.Choices {
+		if ch.Message != nil && ch.Message.Reasoning != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // handleChatCompletions serves POST /v1/chat/completions.
 //
 // Phase 2 request flow (every step is traced):
@@ -81,7 +98,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body domain.ChatCompletionRequest
-	if err := decodeJSONBody(r, s.config.HTTP.MaxBodyBytes, &body); err != nil {
+	// The inference surface decodes leniently: OpenAI-compatible clients
+	// (VS Code Copilot Chat, Cursor, SDKs) send extension fields such as
+	// cache_control, store or service_tier that Synapass accepts and
+	// ignores. Rejecting them with DisallowUnknownFields turns every new
+	// client feature into a 400. Strict decoding stays on the admin
+	// surface, where a typo must fail loudly.
+	if err := decodeLenient(r, s.config.HTTP.MaxBodyBytes, &body); err != nil {
 		fail(err)
 		return
 	}
@@ -439,6 +462,9 @@ func (s *Server) runCompletion(
 		if response.Synapass != nil {
 			response.Synapass.Completion = completion
 		}
+		if responseHasReasoning(response) {
+			w.Header().Set(headerThinking, "present")
+		}
 		writeJSON(w, http.StatusOK, response)
 		logTruncation(s.logger, s.metrics, rc, decision, completion, "")
 		// Store for future hits when the request's cache decision allows it.
@@ -513,6 +539,9 @@ func (s *Server) serveCacheHit(w http.ResponseWriter, rc *domain.RequestContext,
 		s.serveCacheHitStream(w, rc, cached, lookup, body, debug)
 		return
 	}
+	if responseHasReasoning(cached) {
+		w.Header().Set(headerThinking, "present")
+	}
 	writeJSON(w, http.StatusOK, cached)
 	bctx, cancel := bookkeepingContext()
 	defer cancel()
@@ -562,8 +591,10 @@ func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestCo
 		return
 	}
 	content := ""
+	reasoning := ""
 	if len(cached.Choices) > 0 && cached.Choices[0].Message != nil {
 		content = cached.Choices[0].Message.Content.PlainText()
+		reasoning = cached.Choices[0].Message.Reasoning
 	}
 	model := firstNonEmptyString(cached.Model, rc.RequestedModel)
 	created := cached.Created
@@ -582,8 +613,24 @@ func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestCo
 	}, debug)
 	delta := domain.ChatMessage{Role: domain.RoleAssistant, Content: domain.NewTextContent(content)}
 	stop := domain.FinishStop
-	frames := []domain.ChatCompletionChunk{
-		{
+	frames := []domain.ChatCompletionChunk{}
+	// A cached trace replays ahead of the answer, mirroring live-stream
+	// order where thinking arrives before content.
+	if reasoning != "" {
+		thinking := domain.ChatMessage{Role: domain.RoleAssistant, Reasoning: reasoning}
+		frames = append(frames, domain.ChatCompletionChunk{
+			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object: domain.ObjectChatCompletionChunk,
+			Created: created,
+			Model: model,
+			SystemFingerprint: cached.SystemFingerprint,
+			Choices: []domain.Choice{{Index: 0, Delta: &thinking}},
+			Synapass: meta,
+		})
+		meta = nil
+	}
+	frames = append(frames,
+		domain.ChatCompletionChunk{
 			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
 			Object: domain.ObjectChatCompletionChunk,
 			Created: created,
@@ -592,14 +639,14 @@ func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestCo
 			Choices: []domain.Choice{{Index: 0, Delta: &delta}},
 			Synapass: meta,
 		},
-		{
+		domain.ChatCompletionChunk{
 			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
 			Object: domain.ObjectChatCompletionChunk,
 			Created: created,
 			Model: model,
 			Choices: []domain.Choice{{Index: 0, FinishReason: &stop}},
 		},
-	}
+	)
 	for _, frame := range frames {
 		if werr := sse.WriteEvent(frame); werr != nil {
 			// Client went away mid-replay: the hit was still served from

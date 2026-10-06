@@ -182,6 +182,10 @@ type openAIMessage struct {
 	ToolCalls  []openAIToolCall `json:"tool_calls"`
 	ToolCallID string           `json:"tool_call_id"`
 	Refusal    string           `json:"refusal"`
+	// ReasoningContent carries the thinking trace on providers that emit
+	// it (DeepSeek, OpenRouter and compatible proxies). Usually a string,
+	// kept raw because some servers send null or a structured variant.
+	ReasoningContent jsonRaw `json:"reasoning_content,omitempty"`
 }
 
 // openAIToolCall is a tool invocation fragment.
@@ -282,6 +286,11 @@ func (a *openAIAdapter) ChatCompletion(ctx context.Context, req *Request) (*Resp
 		out.Usage = domain.TokenUsage{Estimated: true}
 	}
 
+	// A tool-carrying request answered with nothing fails over to a backend
+	// that can serve tools instead of stalling the agent with an empty 200.
+	if err := rejectVacuousToolResponse(a.Name(), req, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -386,6 +395,12 @@ func (a *openAIAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 		// estimated keeps it out of exact billing paths.
 		final.Usage = domain.TokenUsage{Estimated: true}
 	}
+	// The stream bytes are already committed, so this cannot fail over; it
+	// surfaces as an in-stream error the client displays instead of hanging
+	// on an empty stop, and the health tracker still learns.
+	if err := rejectVacuousToolResponse(a.Name(), req, final); err != nil {
+		return nil, err
+	}
 	return final, nil
 }
 
@@ -407,6 +422,7 @@ func (a *openAIAdapter) convertMessage(m *openAIMessage) *domain.ChatMessage {
 	if len(m.Content) > 0 {
 		_ = out.Content.UnmarshalJSON(m.Content)
 	}
+	out.Reasoning = decodeReasoning(m.ReasoningContent)
 
 	for _, tc := range m.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, domain.ToolCall{
@@ -420,6 +436,22 @@ func (a *openAIAdapter) convertMessage(m *openAIMessage) *domain.ChatMessage {
 		})
 	}
 	return out
+}
+
+// decodeReasoning extracts thinking text from a raw reasoning_content
+// field. Providers send a JSON string or null; anything else (a structured
+// variant) is preserved as-is rather than dropped, because a gateway must
+// not be the component that loses a valid upstream feature.
+func decodeReasoning(raw jsonRaw) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return trimmed
 }
 
 // ListModels returns the model identifiers the provider reports.

@@ -266,22 +266,18 @@ func TestStreamingCompletesWithUsageFrame(t *testing.T) {
 	}
 }
 
-func TestUnknownFieldRejected(t *testing.T) {
+func TestUnknownFieldTolerated(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 
+	// The inference surface is lenient by design: OpenAI-compatible
+	// clients send extension fields (cache_control, store, service_tier,
+	// future additions) that Synapass accepts and ignores. A misspelled
+	// sampling field is therefore ignored rather than rejected; value
+	// validation (ranges, roles, empty content) still 400s.
 	body := `{"model":"` + testModel + `","messages":[{"role":"user","content":"hi"}],"temprature":0.5}`
 	resp := h.do(t, http.MethodPost, "/v1/chat/completions", testToken, body, nil)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a misspelled field", resp.StatusCode)
-	}
-	var decoded struct {
-		Error domain.ErrorBody `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(readBody(t, resp)), &decoded); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if decoded.Error.Code != string(domain.ErrCodeInvalidRequest) {
-		t.Errorf("code = %q", decoded.Error.Code)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a tolerated unknown field: %s", resp.StatusCode, readBody(t, resp))
 	}
 }
 

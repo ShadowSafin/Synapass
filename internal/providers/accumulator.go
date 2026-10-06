@@ -45,6 +45,7 @@ type accumulatedChoice struct {
 	index        int
 	role         domain.MessageRole
 	content      strings.Builder
+	reasoning    strings.Builder
 	refusal      string
 	toolCalls    []*accumulatedToolCall
 	toolCallIdx  map[int]int // upstream index -> position in toolCalls
@@ -111,6 +112,12 @@ func (a *streamAccumulator) ObserveChunk(chunk Chunk) {
 	}
 	if text := chunk.Delta.Content.PlainText(); text != "" {
 		c.content.WriteString(text)
+	}
+	// Thinking fragments accumulate exactly like content fragments, in
+	// arrival order. Providers emit thinking before the answer, so the
+	// assembled trace reads in the order the model thought.
+	if chunk.Delta.Reasoning != "" {
+		c.reasoning.WriteString(chunk.Delta.Reasoning)
 	}
 	if chunk.Delta.Content.IsParts && len(chunk.Delta.Content.Parts) > 0 {
 		// Structured deltas are uncommon but supported by providers that stream
@@ -188,9 +195,10 @@ func (a *streamAccumulator) Response() *Response {
 		}
 
 		msg := &domain.ChatMessage{
-			Role:    role,
-			Content: domain.NewTextContent(c.content.String()),
-			Refusal: c.refusal,
+			Role:      role,
+			Content:   domain.NewTextContent(c.content.String()),
+			Reasoning: c.reasoning.String(),
+			Refusal:   c.refusal,
 		}
 		if len(c.toolCalls) > 0 {
 			msg.ToolCalls = make([]domain.ToolCall, 0, len(c.toolCalls))

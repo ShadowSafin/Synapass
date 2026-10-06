@@ -132,6 +132,18 @@ curl -s -X POST $GATEWAY/admin/v1/providers/$ID/test \
 
 The provider kind has no remote model listing. Add models by hand.
 
+### An agent talks about calling tools but never calls any
+
+The upstream accepted the tools shape and returned an empty completion
+(no text, no calls, no refusal) — common on OpenAI-compatible backends
+whose tool translation is broken for a model family. The gateway treats
+this as an upstream failure, not a success: non-streaming requests fail
+over to the next candidate (or get a clear `502` naming the model), and
+streaming requests get an in-stream error instead of an empty stop. If a
+model proves unable to serve tools, remove `tools` from its row
+(`PATCH /admin/v1/models/{id}`) so tool traffic routes to capable models
+immediately instead of burning attempts.
+
 ## Requests failing
 
 ### `503` from the gateway itself

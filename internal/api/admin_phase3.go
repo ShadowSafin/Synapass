@@ -841,17 +841,17 @@ func (s *Server) handleAdminSyncProviderModels(w http.ResponseWriter, r *http.Re
 	})
 	s.reloadRuntime(ctx)
 
-	// When automatic detection is switched on, models this sync just created are
-	// asked what they can do before the response goes out. Only arrivals are
-	// probed here, never the backlog: a sync that created three models can
-	// afford to ask about three, while a provider with sixty silent models
-	// gets its backfill from the explicit endpoint, on the operator's call.
-	// This is opt-in because it spends upstream tokens; an explicit call to
-	// the endpoint below needs no flag.
-	if s.config.Detection.Enabled && len(res.Created) > 0 {
+	// When automatic detection is switched on, models that declare no
+	// capabilities are asked what they can do before the response goes out.
+	// Arrivals and backlog alike, bounded by max_models_per_run: a provider
+	// with sixty silent models fills ten per sync rather than billing 240
+	// probe calls at once. This is opt-in because it spends upstream tokens;
+	// an explicit call to the endpoint below needs no flag.
+	var report *adminsvc.DetectionReport
+	if s.config.Detection.Enabled {
 		dopts := detectionOptionsFromConfig(s.config.Detection)
-		dopts.Only = res.Created
-		if report, derr := adminsvc.DetectMissingCapabilities(ctx, adapter, s.repos.Models, *provider, dopts); derr == nil && report != nil {
+		if r, derr := adminsvc.DetectMissingCapabilities(ctx, adapter, s.repos.Models, *provider, dopts); derr == nil && r != nil {
+			report = r
 			s.audit(ctx, rc, domain.AuditUpdate, domain.ResourceModel, provider.ID, nil, map[string]any{
 				"action":        "detect-capabilities",
 				"provider":      provider.Name,
@@ -860,12 +860,40 @@ func (s *Server) handleAdminSyncProviderModels(w http.ResponseWriter, r *http.Re
 				"indeterminate": len(report.Indeterminate),
 			})
 			s.reloadRuntime(ctx)
-			writeJSON(w, http.StatusOK, map[string]any{"sync": res, "detection": report})
-			return
 		}
 		// Detection failures must not fail a sync that otherwise succeeded: the
 		// registry is correct, it just learned nothing new. They are audit-logged
 		// by the endpoint when run explicitly.
+	}
+
+	// Model capabilities change nothing while the provider row stays empty:
+	// routing gates on the provider-wide list first. Union what the models
+	// now declare into the provider when it declares nothing, so a sync that
+	// learned tools actually routes tools. An operator's provider list is
+	// never touched, and an empty union writes nothing.
+	reconciled, rerr := adminsvc.ReconcileProviderCapabilities(ctx, s.repos.Providers, s.repos.Models, *provider)
+	if rerr == nil && reconciled != nil && reconciled.Filled {
+		s.audit(ctx, rc, domain.AuditUpdate, domain.ResourceProvider, provider.ID, nil, map[string]any{
+			"action":       "reconcile-capabilities",
+			"provider":     provider.Name,
+			"capabilities": reconciled.Capabilities,
+			"counted":      reconciled.ModelsCounted,
+		})
+		s.reloadRuntime(ctx)
+	}
+	// Reconcile failures are non-fatal like detection failures: the model
+	// registry is correct, only the provider row learned nothing new.
+
+	if report != nil || (reconciled != nil && reconciled.Filled) {
+		out := map[string]any{"sync": res}
+		if report != nil {
+			out["detection"] = report
+		}
+		if reconciled != nil && reconciled.Filled {
+			out["provider_capabilities"] = reconciled
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
 	}
 
 	writeJSON(w, http.StatusOK, res)
@@ -946,6 +974,20 @@ func (s *Server) handleAdminDetectCapabilities(w http.ResponseWriter, r *http.Re
 		"indeterminate": len(report.Indeterminate),
 	})
 	s.reloadRuntime(ctx)
+
+	// Same union as the post-sync run: proven model capabilities change
+	// nothing while the provider row stays empty, so fill it when it
+	// declares nothing. An operator's provider list is never touched.
+	if reconciled, rerr := adminsvc.ReconcileProviderCapabilities(ctx, s.repos.Providers, s.repos.Models, *provider); rerr == nil && reconciled != nil && reconciled.Filled {
+		report.ProviderCapabilitiesFilled = reconciled.Capabilities
+		s.audit(ctx, rc, domain.AuditUpdate, domain.ResourceProvider, provider.ID, nil, map[string]any{
+			"action":       "reconcile-capabilities",
+			"provider":     provider.Name,
+			"capabilities": reconciled.Capabilities,
+			"counted":      reconciled.ModelsCounted,
+		})
+		s.reloadRuntime(ctx)
+	}
 
 	writeJSON(w, http.StatusOK, report)
 }

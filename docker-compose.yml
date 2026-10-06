@@ -192,6 +192,13 @@ services:
       # are interpolated below, so a bare `.env` entry would be ignored.
       SYNAPASS_CACHE_RESPONSE_ENABLED: ${SYNAPASS_CACHE_RESPONSE_ENABLED:-false}
       SYNAPASS_CACHE_EXACT_ENABLED: ${SYNAPASS_CACHE_EXACT_ENABLED:-true}
+      # Capability auto-detection on model sync: probe silent models (tools,
+      # streaming, JSON modes) and union the result into the provider row so
+      # routing learns what the provider can do. Spends upstream tokens
+      # (four minimal calls per model, ten models per sync by default), so it
+      # is off unless enabled here. Must be listed explicitly: compose only
+      # injects variables that are interpolated below.
+      SYNAPASS_DETECTION_ENABLED: ${SYNAPASS_DETECTION_ENABLED:-false}
       SYNAPASS_LOG_FORMAT: json
       # The dashboard origin must be allowed explicitly; a wildcard is refused in
       # production by configuration validation.

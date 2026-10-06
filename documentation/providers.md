@@ -55,17 +55,23 @@ a model permanently.
 
 A discovered model arrives knowing its name and nothing else — the OpenAI
 `/v1/models` response carries no capability metadata — so it inherits the
-provider kind's defaults until someone says otherwise. Two ways to say otherwise,
+provider kind's defaults until someone says otherwise. Three ways to say otherwise,
 in order of preference:
 
 1. **Declare it** when you add the model, or `PATCH` the row later. What you
-   write is final: nothing automatic ever overwrites a declared list.
+write is final: nothing automatic ever overwrites a declared list.
 2. **Read it from the provider** (`POST …/sync-models`, or tick **Sync models**
-   on create). Routers that publish it — LiteLLM-style `/model/info` with
-   `supports_function_calling` and friends — have it recorded per model for free.
+on create). Routers that publish it — LiteLLM-style `/model/info` with
+`supports_function_calling` and friends — have it recorded per model for free.
+When the catalogue carries names only, sync guesses known families
+(`claude-*`, `gpt-*`, `gemini-*`, `deepseek-*`, `grok-*`, `kimi-*`,
+`minimax-*`) for free — zero upstream calls, recorded as
+`capabilities_source: inferred`. Image/video/audio models are never guessed.
+A guess sits below published metadata in trust, so a later catalogue (or your
+edit) replaces it.
 3. **Ask the model** (`POST …/detect-capabilities`). It sends each silent model
-   minimal probes — a one-token completion carrying tools, an event-stream
-   attempt, then JSON modes — and records only what a successful call proves.
+minimal probes — a one-token completion carrying tools, an event-stream
+attempt, then JSON modes — and records only what a successful call proves.
    A 400 that names the feature means it cannot do it; auth failures, rate
    limits and 5xx mean nothing was decided and the row is left alone. Provenance
    lands in the row metadata as
@@ -74,12 +80,19 @@ in order of preference:
    a proven list without it would unroute the model from plain requests.
 
 Detection spends real upstream tokens (four tiny calls per model by default),
-so the automatic post-discovery run is off: set `detection.enabled: true` in the
-config, or call the endpoint with an explicit `{"models": [...]}`. Bounds
+so the automatic post-sync run is off: set `detection.enabled: true` in the
+config (or `SYNAPASS_DETECTION_ENABLED=true`), or call the endpoint with an
+explicit `{"models": [...]}`. Bounds
 (`max_models_per_run`, `concurrency`, `timeout_per_model`) keep one click from
 becoming a bill, and an explicit model list scopes it further. Vision is never
 probed — it needs an image payload, a different cost class from a one-token
 text probe.
+
+Every sync — and every detect run — ends with provider reconciliation: the
+union of what the provider's models declare is written to the provider row
+when the provider declares nothing. Routing gates on the provider-wide list
+first, so without this step models that learned tools still could not serve
+them. A provider list you wrote by hand is final and never touched.
 
 ## Credentials
 

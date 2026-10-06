@@ -43,6 +43,11 @@ type DetectionReport struct {
 	// Skipped counts models that already declared capabilities and were
 	// therefore never probed.
 	Skipped int `json:"skipped"`
+	// ProviderCapabilitiesFilled carries the provider-wide union written by
+	// the post-run reconciliation, when the provider declared nothing and
+	// the models now prove something. Empty when the provider row was left
+	// alone. Set by the caller after reconciliation, not by the run itself.
+	ProviderCapabilitiesFilled []domain.Capability `json:"provider_capabilities_filled,omitempty"`
 }
 
 // DetectMissingCapabilities probes the stored models of one provider that
@@ -88,6 +93,12 @@ func DetectMissingCapabilities(ctx context.Context, adapter TestAdapter, store M
 			continue
 		}
 		if !m.Status.Usable() {
+			continue
+		}
+		// Image, video and audio models are not chat completions: a chat
+		// probe against them is pure token waste, and a shape one happens
+		// to accept would mislabel the row as chat.
+		if nonChatModel(m.Name) {
 			continue
 		}
 		targets = append(targets, m)

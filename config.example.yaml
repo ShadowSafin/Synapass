@@ -273,10 +273,13 @@ eval:
   max_requests: 100
   worker_pool: 4
 
-# Automatic capability detection: ask newly discovered models what they can do
+# Automatic capability detection: ask silent models what they can do
 # (tools, streaming, JSON modes) so routing does not guess from the provider
-# kind. Probing spends real upstream tokens — four minimal completions per model
-# by default — so the automatic run is off. The explicit endpoint
+# kind. Every sync — and every detect run — then unions what the models declare
+# into the provider row when the provider declares nothing, because routing
+# gates on the provider-wide list first. Probing spends real upstream tokens —
+# four minimal completions per model by default — so the automatic run is off.
+# The explicit endpoint
 # POST /admin/v1/providers/{id}/detect-capabilities always works regardless:
 # it is an operator's deliberate "spend the tokens".
 detection:

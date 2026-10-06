@@ -284,7 +284,7 @@ func (a *ollamaAdapter) ChatCompletion(ctx context.Context, req *Request) (*Resp
 
 	finish := convertOllamaDoneReason(parsed.DoneReason, len(msg.ToolCalls) > 0)
 
-	return &Response{
+	out := &Response{
 		ID:      "",
 		Model:   firstNonEmpty(parsed.Model, req.Model),
 		Created: parsed.CreatedAt.Unix(),
@@ -299,7 +299,11 @@ func (a *ollamaAdapter) ChatCompletion(ctx context.Context, req *Request) (*Resp
 			TotalTokens:      parsed.PromptEvalCount + parsed.EvalCount,
 		},
 		Raw: rawJSON(respBody),
-	}, nil
+	}
+	if err := rejectVacuousToolResponse(a.Name(), req, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ChatCompletionStream performs one streaming attempt.
@@ -412,7 +416,11 @@ func (a *ollamaAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 			Estimated:    true,
 		})
 	}
-	return acc.Response(), nil
+	final := acc.Response()
+	if err := rejectVacuousToolResponse(a.Name(), req, final); err != nil {
+		return nil, err
+	}
+	return final, nil
 }
 
 // convertOllamaDoneReason maps Ollama's done_reason onto the domain enum.

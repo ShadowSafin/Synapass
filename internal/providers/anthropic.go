@@ -98,6 +98,8 @@ type anthropicBlock struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// Thinking is set for thinking blocks: the model's visible trace.
+	Thinking string `json:"thinking,omitempty"`
 	// ToolUseID and Content are set for tool_result blocks.
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
@@ -449,7 +451,7 @@ func (a *anthropicAdapter) ChatCompletion(ctx context.Context, req *Request) (*R
 	}
 
 	msg := &domain.ChatMessage{Role: domain.RoleAssistant}
-	var text strings.Builder
+	var text, thinking strings.Builder
 	for _, block := range parsed.Content {
 		switch block.Type {
 		case "text":
@@ -463,17 +465,22 @@ func (a *anthropicAdapter) ChatCompletion(ctx context.Context, req *Request) (*R
 					Arguments: string(block.Input),
 				},
 			})
-		case "thinking", "redacted_thinking":
-			// Extended thinking blocks are intentionally dropped from the
-			// assistant message: they must not be replayed to the model, and
-			// exposing them would break clients expecting OpenAI's schema.
+		case "thinking":
+			// Extended thinking is exposed as reasoning, never as answer
+			// text: clients render reasoning_content separately so the
+			// trace does not read as part of the answer.
+			thinking.WriteString(block.Thinking)
+		case "redacted_thinking":
+			// Encrypted and undisplayable by design. Dropped rather than
+			// leaked as opaque bytes a client would surface as text.
 		}
 	}
 	msg.Content = domain.NewTextContent(text.String())
+	msg.Reasoning = thinking.String()
 
 	finish := convertAnthropicStopReason(parsed.StopReason)
 
-	return &Response{
+	out := &Response{
 		ID:      parsed.ID,
 		Model:   firstNonEmpty(parsed.Model, req.Model),
 		Created: time.Now().Unix(),
@@ -484,7 +491,11 @@ func (a *anthropicAdapter) ChatCompletion(ctx context.Context, req *Request) (*R
 		}},
 		Usage: parsed.Usage.toDomain(),
 		Raw:   rawJSON(respBody),
-	}, nil
+	}
+	if err := rejectVacuousToolResponse(a.Name(), req, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // anthropicStreamEvent is the union of every streaming event the API emits.
@@ -509,8 +520,10 @@ type anthropicStreamEvent struct {
 
 // anthropicDelta is the union of delta payloads.
 type anthropicDelta struct {
-	Type        string `json:"type"`
-	Text        string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Thinking string `json:"thinking"`
+	// PartialJSON is set on input_json_delta events.
 	PartialJSON string `json:"partial_json"`
 	StopReason  string `json:"stop_reason"`
 }
@@ -671,9 +684,27 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 					}
 				}
 			case "thinking_delta":
-				// Extended thinking is not forwarded: it is not part of the
-				// OpenAI response contract and clients would surface it as
-				// answer text.
+				// Thinking streams as reasoning fragments, in its own
+				// channel from the answer text. Clients that understand
+				// reasoning_content render it as a collapsible trace;
+				// clients that do not ignore the unknown field.
+				if ev.Delta.Thinking == "" {
+					continue
+				}
+				chunk := Chunk{
+					ID:    acc.id,
+					Model: acc.model,
+					Delta: domain.ChatMessage{
+						Role:      domain.RoleAssistant,
+						Reasoning: ev.Delta.Thinking,
+					},
+				}
+				acc.ObserveChunk(chunk)
+				if handler != nil {
+					if err := handler(chunk); err != nil {
+						return nil, newStreamError(err)
+					}
+				}
 			}
 
 		case "message_delta":
@@ -725,7 +756,11 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 		}
 	}
 
-	return acc.Response(), nil
+	final := acc.Response()
+	if err := rejectVacuousToolResponse(a.Name(), req, final); err != nil {
+		return nil, err
+	}
+	return final, nil
 }
 
 // convertAnthropicStopReason maps the API's stop reasons onto the domain enum.

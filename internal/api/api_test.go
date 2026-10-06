@@ -103,6 +103,9 @@ type stubAdapter struct {
 	name    string
 	kind    domain.ProviderKind
 	content string
+	// reasoning, when set, is served as the message thinking trace, the way
+	// a provider that emits reasoning_content would.
+	reasoning string
 
 	mu      sync.Mutex
 	calls   int
@@ -166,7 +169,7 @@ func (s *stubAdapter) response(req *providers.Request) *providers.Response {
 		Created: time.Now().Unix(),
 		Choices: []domain.Choice{{
 			Index:        0,
-			Message:      &domain.ChatMessage{Role: domain.RoleAssistant, Content: domain.NewTextContent(s.content)},
+			Message:      &domain.ChatMessage{Role: domain.RoleAssistant, Content: domain.NewTextContent(s.content), Reasoning: s.reasoning},
 			FinishReason: finishReasonPtr(finish),
 		}},
 		Usage: domain.TokenUsage{PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15},
@@ -448,6 +451,70 @@ func TestChatCompletionsReturnsOpenAICompatibleResponse(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsExposesThinkingTrace(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	h.primary.reasoning = "considering the options"
+
+	resp := h.do(t, http.MethodPost, "/v1/chat/completions", testToken, chatBody(""), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, readBody(t, resp))
+	}
+	// The presence header lets an agent detect thinking without parsing JSON.
+	if got := resp.Header.Get("X-Synapass-Thinking"); got != "present" {
+		t.Errorf("X-Synapass-Thinking = %q, want present", got)
+	}
+
+	var decoded struct {
+		Choices []domain.Choice `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(readBody(t, resp)), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Choices) != 1 {
+		t.Fatalf("choices = %d, want 1", len(decoded.Choices))
+	}
+	msg := decoded.Choices[0].Message
+	if msg.Reasoning != "considering the options" {
+		t.Errorf("reasoning_content = %q", msg.Reasoning)
+	}
+	// The trace rides alongside the answer, never inside it.
+	if got := msg.Text(); got != "hello from the primary" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+func TestChatCompletionsOmitsThinkingSignalsWithoutTrace(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+
+	resp := h.do(t, http.MethodPost, "/v1/chat/completions", testToken, chatBody(""), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, readBody(t, resp))
+	}
+	if got := resp.Header.Get("X-Synapass-Thinking"); got != "" {
+		t.Errorf("X-Synapass-Thinking = %q, want absent without a trace", got)
+	}
+	body := readBody(t, resp)
+	var decoded struct {
+		Choices []domain.Choice `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Choices) != 1 {
+		t.Fatalf("choices = %d, want 1", len(decoded.Choices))
+	}
+	// No reasoning key at all: omitempty keeps plain responses byte-clean.
+	var raw struct {
+		Choices []map[string]any `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, present := raw.Choices[0]["message"].(map[string]any)["reasoning_content"]; present {
+		t.Error("a response without thinking must not carry reasoning_content")
+	}
+}
+
 func TestChatCompletionsFailsOverWithoutBreakingTheClient(t *testing.T) {
 	h := newHarness(t, harnessOptions{failPrimary: true})
 
@@ -645,7 +712,6 @@ func TestChatCompletionsRejectsInvalidBody(t *testing.T) {
 		"not json":        `{`,
 		"missing model":   `{"messages":[{"role":"user","content":"hi"}]}`,
 		"empty messages":  `{"model":"gpt-4o","messages":[]}`,
-		"unknown field":   `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"bogus":1}`,
 		"bad role":        `{"model":"gpt-4o","messages":[{"role":"wizard","content":"hi"}]}`,
 		"empty content":   `{"model":"gpt-4o","messages":[{"role":"user","content":""}]}`,
 		"bad temperature": `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":9}`,
@@ -671,6 +737,30 @@ func TestChatCompletionsRejectsInvalidBody(t *testing.T) {
 
 	if h.primary.callCount() != 0 {
 		t.Error("a malformed request must never reach a provider")
+	}
+}
+
+func TestChatCompletionsToleratesClientExtensions(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+
+	// VS Code Copilot Chat sends Anthropic-style cache_control hints at the
+	// top level, on messages and inside content parts; other clients send
+	// store/service_tier. All must be accepted, not 400.
+	cases := map[string]string{
+		"top-level cache_control": `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"cache_control":{"type":"ephemeral"}}`,
+		"message cache_control":   `{"model":"gpt-4o","messages":[{"role":"user","content":"hi","cache_control":{"type":"ephemeral"}}]}`,
+		"part cache_control":      `{"model":"gpt-4o","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}`,
+		"store/service_tier":      `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"store":false,"service_tier":"auto"}`,
+		"future unknown field":    `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"bogus_future_field":1}`,
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			resp := h.do(t, http.MethodPost, "/v1/chat/completions", testToken, body, nil)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readBody(t, resp))
+			}
+		})
 	}
 }
 

@@ -116,6 +116,7 @@ health decision.
 | `X-Synapass-Provider` | The provider that served (or failed) the request. |
 | `X-Synapass-Retryable` | `true` when a retry is worth attempting, on failures. |
 | `X-Synapass-Upstream-Status` | The original upstream status when Synapass translated it. |
+| `X-Synapass-Thinking` | `present` on non-streaming responses that carry a thinking trace (`reasoning_content`). Streams cannot carry it — headers commit before thinking arrives — so stream clients detect thinking by `delta.reasoning_content` frames instead. |
 | `Retry-After` | Present on `429` when the provider supplied one. |
 
 ## Routing intent
@@ -189,6 +190,18 @@ The default `synapass` block is stable attribution only
 `X-Synapass-Debug: true` restores policy names, strategy, attempts, task,
 shaping and route reasons. For worked curl and SDK examples, see
 [Getting started](getting-started.md#5-make-a-call).
+
+**Thinking traces**
+
+When the upstream volunteers thinking, the gateway forwards it rather than
+dropping it: `reasoning_content` on the assistant message (non-streaming) or
+on `delta` frames ahead of the answer (streaming), following the
+OpenAI-compatible convention. Thinking is never mixed into `content`, so
+agents that render the trace show it separately and agents that do not
+understand it ignore the unknown field safely. The trace is part of the
+stored response, so cache hits replay it the same way. Only forwarded, never
+requested: the gateway sends no thinking budget the client did not ask for
+(`reasoning_effort` passes through when the client sends it).
 
 **Streaming**
 

@@ -53,11 +53,15 @@ type SyncResult struct {
 	// CapabilitiesFilled counts models whose capability list this run supplied
 	// from the provider's own catalogue.
 	CapabilitiesFilled int `json:"capabilities_filled"`
+	// CapabilitiesInferred counts models whose capability list this run
+	// guessed from the family name. Zero-cost: no upstream call is sent.
+	CapabilitiesInferred int `json:"capabilities_inferred"`
 	// CapabilitySource records where model capabilities came from:
-	// "provider" when the provider published them, "ids_only" when its
-	// catalogue carried nothing but names. Without this a filled count of zero
-	// is ambiguous between "the provider told us nothing" and "everything was
-	// already filled", which are very different things to be looking at.
+	// "provider" when the provider published them, "inferred" when only the
+	// family-name guess supplied them, "ids_only" when its catalogue carried
+	// nothing but names. Without this a filled count of zero is ambiguous
+	// between "the provider told us nothing" and "everything was already
+	// filled", which are very different things to be looking at.
 	CapabilitySource string `json:"capability_source"`
 }
 
@@ -65,6 +69,9 @@ type SyncResult struct {
 const (
 	// CapabilitySourceProvider means the provider published per-model metadata.
 	CapabilitySourceProvider = "provider"
+	// CapabilitySourceInferred means only the zero-cost family-name guess
+	// supplied capabilities.
+	CapabilitySourceInferred = "inferred"
 	// CapabilitySourceIDsOnly means the catalogue carried names only.
 	CapabilitySourceIDsOnly = "ids_only"
 )
@@ -72,10 +79,13 @@ const (
 // SyncModels discovers a provider's remote models and populates the registry.
 //
 // Every remote name absent from the registry becomes a model row owned by the
-// API. Rows that already exist are left untouched: a re-sync must never revert
-// operator edits to pricing, aliases, status or priority. Disabling or
-// deleting a model therefore survives re-syncs, which is what makes the sync
-// safe to run repeatedly.
+// API, carrying catalogue-published capabilities when the provider offers
+// them or a family-name guess otherwise (zero upstream cost). Rows that
+// already exist are left untouched, except that an inferred guess is upgraded
+// when the catalogue now publishes metadata: a re-sync never reverts operator
+// edits to pricing, aliases, status or priority, and never second-guesses a
+// declared or probed list. Disabling or deleting a model therefore survives
+// re-syncs, which is what makes the sync safe to run repeatedly.
 func SyncModels(ctx context.Context, adapter TestAdapter, store ModelStore, opts SyncOptions) (*SyncResult, error) {
 	lister, ok := adapter.(ModelLister)
 	if !ok {
@@ -127,14 +137,31 @@ func SyncModels(ctx context.Context, adapter TestAdapter, store ModelStore, opts
 			// A model imported before the provider published capability metadata
 			// has no list and is silently unroutable for tools. Fill it when the
 			// catalogue now proves one, and only then: a list an operator wrote
-			// is never second-guessed by a re-sync, which is the same rule that
-			// protects their pricing and status.
-			if len(remote.Capabilities) > 0 && len(prior.Capabilities) == 0 && store != nil {
+			// (or a probe proved) is never second-guessed by a re-sync, which
+			// is the same rule that protects their pricing and status. An
+			// inferred guess sits below the catalogue in trust, so published
+			// metadata replaces it.
+			if len(remote.Capabilities) > 0 && store != nil &&
+				(len(prior.Capabilities) == 0 || capabilitiesSource(prior) == CapabilitiesSourceInferred) {
 				prior.Capabilities = remote.Capabilities
 				prior.Metadata = withSource(prior.Metadata, CapabilitiesSourceProvider)
 				prior.UpdatedAt = domain.Now()
 				if _, uerr := store.Upsert(ctx, &prior); uerr == nil {
 					res.CapabilitiesFilled++
+				}
+				continue
+			}
+			// No catalogue metadata and still no list: guess from the family
+			// name. Zero-cost, and the row stays eligible for a later probe
+			// or catalogue upgrade.
+			if len(prior.Capabilities) == 0 && store != nil {
+				if inferred := InferCapabilities(name); len(inferred) > 0 {
+					prior.Capabilities = inferred
+					prior.Metadata = withSource(prior.Metadata, CapabilitiesSourceInferred)
+					prior.UpdatedAt = domain.Now()
+					if _, uerr := store.Upsert(ctx, &prior); uerr == nil {
+						res.CapabilitiesInferred++
+					}
 				}
 			}
 			continue
@@ -155,6 +182,13 @@ func SyncModels(ctx context.Context, adapter TestAdapter, store ModelStore, opts
 			m.Capabilities = remote.Capabilities
 			m.Metadata = withSource(nil, CapabilitiesSourceProvider)
 			res.CapabilitiesFilled++
+		} else if inferred := InferCapabilities(name); len(inferred) > 0 {
+			// The catalogue carried a name only. Guess from the family
+			// rather than leaving the row silent: zero upstream cost, and
+			// a probe or published metadata can replace the guess later.
+			m.Capabilities = inferred
+			m.Metadata = withSource(nil, CapabilitiesSourceInferred)
+			res.CapabilitiesInferred++
 		}
 		if store == nil {
 			res.Created = append(res.Created, name)
@@ -169,6 +203,13 @@ func SyncModels(ctx context.Context, adapter TestAdapter, store ModelStore, opts
 		// re-read.
 		stored[strings.ToLower(name)] = *m
 		res.Created = append(res.Created, name)
+	}
+	// The catalogue source describes the listing, not what the run achieved:
+	// a names-only listing that still filled rows did so by inference.
+	if res.CapabilitiesFilled > 0 {
+		res.CapabilitySource = CapabilitySourceProvider
+	} else if res.CapabilitiesInferred > 0 {
+		res.CapabilitySource = CapabilitySourceInferred
 	}
 	return res, nil
 }

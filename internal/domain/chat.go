@@ -45,6 +45,11 @@ type ContentPart struct {
 	Text string `json:"text,omitempty"`
 	// ImageURL is set for "image_url" parts.
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	// CacheControl carries an Anthropic-style prompt-caching hint
+	// (e.g. {"type":"ephemeral"}) when a client attaches one to a part.
+	// Synapass accepts and ignores it: it is an upstream optimization
+	// hint, not a routing input.
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 	// Raw preserves parts Synapass does not model, so unknown multimodal
 	// payloads pass through to the provider untouched.
 	Raw json.RawMessage `json:"-"`
@@ -194,6 +199,16 @@ type ChatMessage struct {
 	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
 	// Refusal is returned by providers that expose safety refusals.
 	Refusal string `json:"refusal,omitempty"`
+	// CacheControl carries a message-level prompt-caching hint sent by
+	// clients such as VS Code Copilot Chat. Accepted and ignored.
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	// Reasoning carries the model's thinking trace (OpenAI-compatible
+	// `reasoning_content`, Anthropic thinking blocks). It is populated on
+	// responses the gateway serves, never required on requests: a client
+	// that echoes it back gets continuity on providers that honour it,
+	// and providers that do not honour it ignore it. Omitted when empty
+	// so plain responses carry no new keys.
+	Reasoning string `json:"reasoning_content,omitempty"`
 }
 
 // Text is the message's textual content.
@@ -270,6 +285,16 @@ type ChatCompletionRequest struct {
 	ToolExecution   *ToolRunConfig    `json:"tool_execution,omitempty"`
 	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+	// CacheControl carries a top-level prompt-caching hint. Accepted and
+	// ignored, like the message/part-level variants.
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	// Store, ServiceTier, SafetyIdentifier and PromptCacheKey are
+	// OpenAI-compatible passthrough fields that common clients send.
+	// Accepted and ignored: they do not change routing.
+	Store            *bool  `json:"store,omitempty"`
+	ServiceTier      string `json:"service_tier,omitempty"`
+	SafetyIdentifier string `json:"safety_identifier,omitempty"`
+	PromptCacheKey   string `json:"prompt_cache_key,omitempty"`
 }
 
 // Streaming reports whether the client asked for a stream.
