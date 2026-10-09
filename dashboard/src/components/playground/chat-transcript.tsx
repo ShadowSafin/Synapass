@@ -11,7 +11,7 @@
  * flight streams into the same card shape, and a failed run renders as an
  * error card with the same next-step hint the response panel shows.
  */
-import { AlertTriangle, Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Loader2, RotateCcw, Sparkles, X } from 'lucide-react';
 import * as React from 'react';
 
 import { Markdown } from '@/components/playground/markdown';
@@ -58,6 +58,87 @@ function CopyAnswer({ text }: { text: string }) {
   );
 }
 
+function RetryButton({ onRetry, disabled }: { onRetry: () => void; disabled: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onRetry}
+      disabled={disabled}
+      title="Run again with the same configuration"
+      className="flex h-7 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-[12px] font-medium text-white transition-colors hover:bg-white/20 disabled:opacity-40"
+    >
+      <RotateCcw className="size-3.5" />
+      Retry run
+    </button>
+  );
+}
+
+/** A completed user turn. Memoized: turns never change, so streaming chunks
+ * must not re-render the whole thread on every frame. */
+const UserTurn = React.memo(function UserTurn({
+  message,
+  onDelete,
+  disabled,
+}: {
+  message: PlaygroundMessage;
+  onDelete: (id: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="group flex items-start justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => onDelete(message.id)}
+        disabled={disabled}
+        aria-label="Remove this message"
+        title="Remove this message"
+        className="mt-2 flex size-6 shrink-0 items-center justify-center rounded-full bg-neutral-950/60 text-white/70 opacity-0 backdrop-blur transition-all hover:bg-neutral-950 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+      >
+        <X className="size-3" />
+      </button>
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-neutral-950 px-4 py-2.5 text-[13px] leading-relaxed text-white shadow-lg shadow-neutral-950/20">
+        {message.content}
+      </div>
+    </div>
+  );
+});
+
+/** A completed assistant turn. Memoized for the same reason as UserTurn. */
+const AssistantTurn = React.memo(function AssistantTurn({
+  message,
+  meta,
+  onDelete,
+  disabled,
+}: {
+  message: PlaygroundMessage;
+  meta: ChatMeta | undefined;
+  onDelete: (id: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="group flex items-start gap-2">
+      <div className="min-w-0 flex-1 rounded-2xl rounded-bl-md border border-white/15 bg-neutral-950/70 shadow-xl shadow-neutral-950/20 backdrop-blur-md">
+        <div className="px-4 pt-3">
+          <Markdown source={message.content} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1">
+          <div className="min-w-0 flex-1">{meta ? <MetaChips meta={meta} /> : null}</div>
+          <CopyAnswer text={message.content} />
+          <button
+            type="button"
+            onClick={() => onDelete(message.id)}
+            disabled={disabled}
+            aria-label="Remove this answer"
+            title="Remove this answer"
+            className="flex size-7 items-center justify-center rounded-lg text-neutral-400 opacity-0 transition-all hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
 function MetaChips({ meta }: { meta: ChatMeta }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -102,21 +183,29 @@ export function ChatTranscript({
   streaming,
   streamContent,
   streamTools,
+  streamFirstTokenMs,
   failedRun,
   metaById,
   onDelete,
+  onRetry,
   disabled,
+  retryDisabled,
 }: {
   messages: PlaygroundMessage[];
   /** A primary-lane run is in flight; its text streams into the trailing card. */
   streaming: boolean;
   streamContent: string;
   streamTools: PlaygroundToolCall[];
+  /** First-token timing for the in-flight run, 0 until the first token. */
+  streamFirstTokenMs?: number;
   /** The latest primary run when it failed — rendered as an error card. */
   failedRun: PlaygroundRun | null;
   metaById: Record<string, ChatMeta>;
   onDelete: (id: string) => void;
+  /** Re-run the failed run with its recorded configuration. */
+  onRetry?: () => void;
   disabled: boolean;
+  retryDisabled?: boolean;
 }) {
   const bottomRef = React.useRef<HTMLDivElement>(null);
   // Whether the viewport is pinned near the page bottom. While a stream is
@@ -143,51 +232,18 @@ export function ChatTranscript({
     <div className="space-y-4 py-6">
       {messages.map((message) => {
         if (message.role === 'user') {
-          return (
-            <div key={message.id} className="group flex items-start justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => onDelete(message.id)}
-                disabled={disabled}
-                aria-label="Remove this message"
-                title="Remove this message"
-                className="mt-2 flex size-6 shrink-0 items-center justify-center rounded-full bg-neutral-950/60 text-white/70 opacity-0 backdrop-blur transition-all hover:bg-neutral-950 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
-              >
-                <X className="size-3" />
-              </button>
-              <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-neutral-950 px-4 py-2.5 text-[13px] leading-relaxed text-white shadow-lg shadow-neutral-950/20">
-                {message.content}
-              </div>
-            </div>
-          );
+          return <UserTurn key={message.id} message={message} onDelete={onDelete} disabled={disabled} />;
         }
 
         if (message.role === 'assistant') {
-          const meta = metaById[message.id];
           return (
-            <div key={message.id} className="group flex items-start gap-2">
-              <div className="min-w-0 flex-1 rounded-2xl rounded-bl-md border border-white/15 bg-neutral-950/70 shadow-xl shadow-neutral-950/20 backdrop-blur-md">
-                <div className="px-4 pt-3">
-                  <Markdown source={message.content} />
-                </div>
-                <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1">
-                  <div className="min-w-0 flex-1">
-                    {meta ? <MetaChips meta={meta} /> : null}
-                  </div>
-                  <CopyAnswer text={message.content} />
-                  <button
-                    type="button"
-                    onClick={() => onDelete(message.id)}
-                    disabled={disabled}
-                    aria-label="Remove this answer"
-                    title="Remove this answer"
-                    className="flex size-7 items-center justify-center rounded-lg text-neutral-400 opacity-0 transition-all hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
+            <AssistantTurn
+              key={message.id}
+              message={message}
+              meta={metaById[message.id]}
+              onDelete={onDelete}
+              disabled={disabled}
+            />
           );
         }
 
@@ -233,16 +289,46 @@ export function ChatTranscript({
               )}
               <ToolCalls calls={streamTools} />
             </div>
-            <div className="flex items-center gap-1.5 px-4 pb-3 pt-2" aria-hidden>
+            <div className="flex items-center gap-1.5 px-4 pb-3 pt-2">
               <span className="size-1.5 animate-bounce rounded-full bg-neutral-300 [animation-delay:-0.2s]" />
               <span className="size-1.5 animate-bounce rounded-full bg-neutral-300 [animation-delay:-0.1s]" />
               <span className="size-1.5 animate-bounce rounded-full bg-neutral-300" />
+              {streamFirstTokenMs != null && streamFirstTokenMs > 0 ? (
+                <span className="ml-1 text-[11px] text-neutral-400">
+                  first token {formatDurationMs(streamFirstTokenMs)}
+                </span>
+              ) : null}
+              {streamContent ? (
+                <span className="ml-auto">
+                  <CopyAnswer text={streamContent} />
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
       ) : null}
 
-      {!streaming && failedRun?.error ? (
+      {!streaming && failedRun?.error?.code === 'playground_cancelled' ? (
+        <div className="rounded-2xl border border-amber-300/25 bg-neutral-950/70 p-4 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-white">Run stopped</p>
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {failedRun.error.code ? <Badge tone="outline">{failedRun.error.code}</Badge> : null}
+              {onRetry ? <RetryButton onRetry={onRetry} disabled={retryDisabled ?? false} /> : null}
+            </div>
+          </div>
+          <p className="mt-1.5 break-words text-[12px] leading-relaxed text-neutral-300">
+            {failedRun.error.message} — the text below is what arrived before the stop.
+          </p>
+          {failedRun.content ? (
+            <div className="mt-2 rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+              <Markdown source={failedRun.content} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!streaming && failedRun?.error && failedRun.error.code !== 'playground_cancelled' ? (
         <div className="rounded-2xl border border-rose-300/25 bg-rose-950/70 p-4 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-4 shrink-0 text-rose-300" />
@@ -252,6 +338,7 @@ export function ChatTranscript({
                 <Badge tone="danger">HTTP {failedRun.error.status}</Badge>
               ) : null}
               {failedRun.error.code ? <Badge tone="outline">{failedRun.error.code}</Badge> : null}
+              {onRetry ? <RetryButton onRetry={onRetry} disabled={retryDisabled ?? false} /> : null}
             </div>
           </div>
           <p className="mt-2 break-words text-[13px] leading-relaxed text-rose-100">

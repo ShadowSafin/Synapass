@@ -9,7 +9,7 @@
  * A failure is rendered as prominently as a success — a testing console that
  * only looks good when things work is not a testing console.
  */
-import { AlertTriangle, Check, Copy, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Loader2, RotateCcw, Sparkles } from 'lucide-react';
 import * as React from 'react';
 
 import { Markdown } from '@/components/playground/markdown';
@@ -141,7 +141,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-function ErrorCard({ error }: { error: PlaygroundError }) {
+function ErrorCard({ error, onRetry }: { error: PlaygroundError; onRetry?: () => void }) {
   const hint = failureHint(error);
   return (
     <div className="rounded-xl border border-danger/30 bg-danger/[0.06] p-4">
@@ -152,6 +152,17 @@ function ErrorCard({ error }: { error: PlaygroundError }) {
           {error.status > 0 ? <Badge tone="danger">HTTP {error.status}</Badge> : null}
           {error.code ? <Badge tone="outline">{error.code}</Badge> : null}
           {error.type ? <Badge tone="neutral">{error.type}</Badge> : null}
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              title="Run again with the same configuration"
+              className="flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-white/20"
+            >
+              <RotateCcw className="size-3" />
+              Retry
+            </button>
+          ) : null}
         </div>
       </div>
       <p className="mt-2 break-words text-[13px] leading-relaxed text-neutral-200">{error.message}</p>
@@ -168,6 +179,8 @@ export function ResponsePanel({
   running,
   run,
   elapsedMs,
+  firstTokenMs,
+  onRetry,
 }: {
   config: PlaygroundConfig;
   messages: PlaygroundMessage[];
@@ -178,6 +191,10 @@ export function ResponsePanel({
   /** The most recent completed primary-lane run, or null before the first. */
   run: PlaygroundRun | null;
   elapsedMs: number;
+  /** First-token timing for the in-flight run, 0 until the first token. */
+  firstTokenMs?: number;
+  /** Re-run the failed run with its recorded configuration. */
+  onRetry?: () => void;
 }) {
   const [view, setView] = React.useState<View>('answer');
 
@@ -229,6 +246,9 @@ export function ResponsePanel({
           <span className="inline-flex items-center gap-1.5 text-[11px] text-primary">
             <Loader2 className="size-3 animate-spin" />
             streaming · {formatDurationMs(elapsedMs)}
+            {firstTokenMs != null && firstTokenMs > 0
+              ? ` · first token ${formatDurationMs(firstTokenMs)}`
+              : ''}
           </span>
         ) : run ? (
           <span className="text-[11px] text-muted-foreground">
@@ -248,7 +268,7 @@ export function ResponsePanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
         {error ? (
-          <ErrorCard error={error} />
+          <ErrorCard error={error} onRetry={onRetry} />
         ) : view === 'answer' ? (
           answer ? (
             <Markdown source={answer} />
