@@ -14,6 +14,7 @@ import (
 	"github.com/shadowsafin/synapass/internal/bootstrap"
 	"github.com/shadowsafin/synapass/internal/config"
 	"github.com/shadowsafin/synapass/internal/domain"
+	"github.com/shadowsafin/synapass/internal/platcache"
 	"github.com/shadowsafin/synapass/internal/policy"
 	"github.com/shadowsafin/synapass/internal/providers"
 	"github.com/shadowsafin/synapass/internal/routing"
@@ -283,6 +284,41 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 	}
 	app.tunnels = tunnels
 
+	// ---- Platform cache (tenant/catalog/route/flags) ----
+	// L2 is Redis when available, absent otherwise: without Redis the cache
+	// runs L1 + DB fallback only and every hook stays safe. Reads never
+	// fail on a Redis outage; they degrade to the loader (DB).
+	var platStore platcache.Store
+	if app.redis != nil && app.redis.Client() != nil {
+		platStore = platcache.NewRedisAdapter(app.redis.Client(), app.redis.Prefix())
+	}
+	platMetrics := &platcache.MetricsHook{
+		OnHit: func(tenant, kind string) {
+			app.metrics.ObserveCacheKind(tenant, "platform:"+kind, true)
+		},
+		OnMiss: func(tenant string) {
+			app.metrics.ObserveCacheKind(tenant, "platform:miss", false)
+		},
+		OnStaleHit: func(tenant, kind string) {
+			app.metrics.ObserveCacheKind(tenant, "platform-stale:"+kind, true)
+		},
+		OnInvalidate: func(scope, reason string) {
+			app.metrics.ObserveCacheInvalidation("platform:"+scope, reason)
+		},
+		OnResolve: func(cached bool, seconds float64) {
+			outcome := "miss"
+			if cached {
+				outcome = "hit"
+			}
+			app.metrics.ObserveCacheLookup("platform", outcome, seconds)
+		},
+	}
+	platformCache := platcache.New(platStore, platcache.Options{
+		KeyPrefix: "synapass",
+		Logger:    logger,
+		Metrics:   platMetrics,
+	})
+
 	// ---- HTTP ----
 	server, err := api.NewServer(api.Deps{
 		Config:        cfg,
@@ -297,6 +333,7 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 		Adapters:      registry,
 		Repositories:  app.repos,
 		Redis:         app.redis,
+		PlatformCache: platformCache,
 		Postgres:      app.postgres,
 		ClickHouse:    app.clickhouse,
 		NATS:          app.nats,

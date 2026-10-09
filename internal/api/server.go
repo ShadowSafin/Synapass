@@ -29,6 +29,7 @@ import (
 	"github.com/shadowsafin/synapass/internal/dashboardauth"
 	"github.com/shadowsafin/synapass/internal/domain"
 	"github.com/shadowsafin/synapass/internal/logging"
+	"github.com/shadowsafin/synapass/internal/platcache"
 	"github.com/shadowsafin/synapass/internal/policy"
 	"github.com/shadowsafin/synapass/internal/providers"
 	"github.com/shadowsafin/synapass/internal/replay"
@@ -99,6 +100,10 @@ type Deps struct {
 	PolicyEngine  PolicyEngineService
 	Shaper        ShapingService
 	ResponseCache ResponseCacheService
+	// PlatformCache is the multi-layer tenant/catalog/route cache. Nil
+	// disables it; every hook is nil-safe so a gateway without it behaves
+	// exactly as before.
+	PlatformCache PlatformCacheService
 	Scorer        ScoringService
 	Guardrails    GuardrailService
 	Replay        ReplayService
@@ -154,6 +159,8 @@ type Server struct {
 	policyEng  PolicyEngineService
 	shaper     ShapingService
 	cache      ResponseCacheService
+	// plat is the platform cache (tenant/catalog/route/flags). Nil-safe.
+	plat       *platcache.Cache
 	scorer     ScoringService
 	guard      GuardrailService
 	replaySvc  ReplayService
@@ -218,6 +225,7 @@ func NewServer(deps Deps) (*Server, error) {
 		policyEng:  deps.PolicyEngine,
 		shaper:     deps.Shaper,
 		cache:      deps.ResponseCache,
+		plat:       resolvePlatformCache(deps.PlatformCache),
 		scorer:     deps.Scorer,
 		guard:      deps.Guardrails,
 		replaySvc:  deps.Replay,

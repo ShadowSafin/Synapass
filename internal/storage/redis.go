@@ -97,6 +97,14 @@ func tlsConfig(enabled bool) *tls.Config {
 // Client exposes the underlying client for advanced use.
 func (r *Redis) Client() *redis.Client { return r.client }
 
+// Prefix reports the configured key prefix (default "synapass").
+func (r *Redis) Prefix() string {
+	if r == nil || r.prefix == "" {
+		return "synapass"
+	}
+	return r.prefix
+}
+
 // Close releases the connection.
 func (r *Redis) Close() error {
 	if r == nil || r.client == nil {
