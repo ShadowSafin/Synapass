@@ -133,6 +133,35 @@ stream-started error rather than appending a second attempt's tokens to the firs
 | Offline replay | Request payloads (messages, max tokens) are captured at serve time, so any pasted request ID replays across providers × models with versioned-sheet pricing — no manual prompt reconstruction |
 | LAN address | The Endpoints page derives the gateway's LAN URL from the browser's own address, and `scripts/up.ps1` / `scripts/deploy.ps1` detect the current LAN IPv4 at launch — no hardcoded IP survives a network change |
 
+## Platform cache
+
+A second cache beside the response cache, for everything else the hot paths
+read — tenant and workspace metadata, route mappings, the provider/model
+catalogue, pricing snapshots, feature flags, tenant settings, usage
+aggregates, dependency health and host/path resolution. Three layers
+(in-process L1, shared Redis L2, opt-in HTTP L3), single-flighted reads with
+stale-while-revalidate, versioned tenant-aware keys, secrets refused by
+construction, and graceful degradation to database fallback when Redis is
+down. Tenant writes retire and prewarm their own entries; response-cache
+flushes mirror into the matching platform scope; health and counters arrive
+in the `platform` block of cache stats. See [Caching](caching.md).
+
+## Streaming overhaul
+
+Low-latency, observable, cancellable streams on every provider:
+
+- Liveness on all three streaming adapters: `first_token` and `stream_idle`
+  budgets enforced per attempt, with a watchdog for zero-byte stalls.
+- Gateway SSE hardening: `: ping` keepalives, slow-write accounting,
+  async post-`[DONE]` cache store, estimated usage for cancelled prefixes,
+  cancel-aware outcomes.
+- Streams join the response cache: a hit replays as SSE, a clean completion
+  is stored — never a cancelled or errored one.
+- Seven `synapass_stream_*` metrics (TTFT, first text, duration by outcome,
+  active gauge, errors by stage, cancels, backpressure) plus alerts.
+- Playground keeps partial answers on cancel, retries failures in place,
+  stops lanes individually, and shows live first-token timing.
+
 ## Documentation
 
 This documentation set. The previous phase-by-phase notes were folded into
