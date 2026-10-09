@@ -1446,6 +1446,10 @@ func (s *Server) handleAdminCreateTenant(w http.ResponseWriter, r *http.Request)
 
 	s.audit(ctx, rc, domain.AuditCreate, domain.ResourceTenant, saved.ID, nil, tenantAfter(saved))
 	s.reloadRuntime(ctx)
+	// Provisioning sequence: DB state is committed above; retire any stale
+	// platform entries, then prewarm this tenant's hot keys.
+	s.platTenantChanged(ctx, saved.ID)
+	s.platTenantPrewarm(ctx, saved.ID)
 
 	writeJSON(w, http.StatusCreated, saved)
 }
@@ -1525,6 +1529,7 @@ func (s *Server) handleAdminUpdateTenant(w http.ResponseWriter, r *http.Request)
 	}
 	s.audit(ctx, rc, action, domain.ResourceTenant, updated.ID, before, tenantAfter(&updated))
 	s.reloadRuntime(ctx)
+	s.platTenantChanged(ctx, updated.ID)
 
 	writeJSON(w, http.StatusOK, &updated)
 }
@@ -1583,6 +1588,7 @@ func (s *Server) handleAdminDeleteTenant(w http.ResponseWriter, r *http.Request)
 		"keys_removed": len(keys),
 	})
 	s.reloadRuntime(ctx)
+	s.platTenantChanged(ctx, id)
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": id, "keys_removed": len(keys)})
 }

@@ -175,7 +175,10 @@ func (s *Server) handleAdminProviderScores(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleAdminCacheStats(w http.ResponseWriter, r *http.Request) {
 	rc := requestContext(r.Context())
 	if s.cache == nil || !s.cache.Enabled() {
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "stats": domain.CacheStats{}})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled": false, "stats": domain.CacheStats{},
+			"platform": s.PlatformCacheHealth(r.Context()),
+		})
 		return
 	}
 	_ = rc
@@ -198,6 +201,7 @@ func (s *Server) handleAdminCacheStats(w http.ResponseWriter, r *http.Request) {
 		"enabled": true,
 		"stats":   stats,
 		"config":  s.config.Cache,
+		"platform": s.PlatformCacheHealth(r.Context()),
 	})
 }
 
@@ -241,6 +245,15 @@ func (s *Server) handleAdminCacheInvalidate(w http.ResponseWriter, r *http.Reque
 		}
 		removed = n
 	}
+	// Drive the platform cache from the same manual flush (tenant/provider/
+	// model/all scopes). Key scope stays response-cache-only: key material
+	// is never platform-cached. Provider/model targets double as the
+	// platform provider id / catalog generation, so pass them through.
+	platTarget := body.Provider
+	if body.Model != "" {
+		platTarget = body.Model
+	}
+	s.platFlushBestEffort(ctx, scope, body.TenantID, platTarget)
 	if s.repos != nil && s.repos.CacheEntries != nil {
 		if n, err := s.repos.CacheEntries.DeleteScope(ctx, body.TenantID, body.Model, body.Provider, body.Key); err == nil {
 			_ = n

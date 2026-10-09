@@ -21,6 +21,9 @@ func (s *Server) cacheFlushBestEffort(ctx context.Context, scope, tenantID, targ
 			s.logger.Warn("cache flush failed", "scope", scope, "target", target, "error", err)
 		}
 	}
+	// Mirror the flush into the platform cache (tenant/catalog/route/flags)
+	// so both layers converge on the same write. Nil-safe and best-effort.
+	s.platFlushBestEffort(ctx, scope, tenantID, target)
 	if s.repos != nil && s.repos.CacheEntries != nil {
 		if scope == domain.CacheScopeModel {
 			_, _ = s.repos.CacheEntries.DeleteScope(ctx, tenantID, target, "", "")
