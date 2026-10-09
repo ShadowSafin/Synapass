@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/shadowsafin/synapass/internal/domain"
 )
@@ -84,12 +88,27 @@ func writeError(w http.ResponseWriter, err error, meta *domain.ResponseMetadata)
 	writeJSON(w, status, body)
 }
 
+// slowWriteThreshold marks a downstream write as backpressured. A flush that
+// takes this long means the client (or an intermediary) is reading slowly;
+// the event is counted, never retried, and delivery continues.
+const slowWriteThreshold = 500 * time.Millisecond
+
+// keepaliveInterval is the SSE comment cadence during idle streams. Comments
+// are protocol-level no-ops: they reset proxy idle timers without looking
+// like model output.
+const keepaliveInterval = 15 * time.Second
+
 // sseWriter streams server-sent events.
 //
 // Writing SSE is deceptively fiddly: the response must be flushed after every
 // event or a proxy will buffer the whole stream, and a client disconnect surfaces
 // as a write error that must not be treated as a gateway fault.
+//
+// All writes are serialized under mu because keepalives are emitted from a
+// background goroutine while content frames are written on the request
+// goroutine; concurrent Write calls on an http.ResponseWriter are a data race.
 type sseWriter struct {
+	mu      sync.Mutex
 	w       http.ResponseWriter
 	flusher http.Flusher
 	// wroteHeader tracks whether the status line has been sent, because the first
@@ -97,6 +116,18 @@ type sseWriter struct {
 	wroteHeader bool
 	// bytes counts the payload written, used for the response size metric.
 	bytes int64
+	// firstByteAt is when the first byte reached the client. Zero until then.
+	firstByteAt time.Time
+	// events counts content frames (WriteEvent calls), excluding keepalives.
+	// Atomic because WriteEvent increments it outside the write lock.
+	events atomic.Int64
+	// OnSlowWrite, when set, is called (while holding no locks) for every
+	// write+flush slower than slowWriteThreshold.
+	OnSlowWrite func(latency time.Duration, bytes int64)
+
+	keepMu   sync.Mutex
+	keepStop chan struct{}
+	keepDone chan struct{}
 }
 
 // newSSEWriter prepares a response for streaming.
@@ -128,11 +159,16 @@ func (s *sseWriter) WriteEvent(payload any) error {
 	if err != nil {
 		return domain.NewError(domain.ErrCodeInternal, "failed to encode a stream event").Wrap(err)
 	}
+	// The event count is incremented before the write so a failed write still
+	// leaves an honest "attempted" count; BytesWritten stays write-accurate.
+	s.events.Add(1)
 	return s.WriteRaw("data: " + string(encoded) + "\n\n")
 }
 
 // WriteRaw writes a pre-encoded frame and flushes it.
 func (s *sseWriter) WriteRaw(frame string) error {
+	start := time.Now()
+	s.mu.Lock()
 	if !s.wroteHeader {
 		// 200 is correct even for a request that will fail mid-stream: the
 		// provider call has already started and there is no meaningful status to
@@ -143,11 +179,21 @@ func (s *sseWriter) WriteRaw(frame string) error {
 
 	n, err := s.w.Write([]byte(frame))
 	s.bytes += int64(n)
-	if err != nil {
-		return err
+	if err == nil {
+		if s.firstByteAt.IsZero() {
+			s.firstByteAt = time.Now()
+		}
+		s.flusher.Flush()
 	}
-	s.flusher.Flush()
-	return nil
+	onSlow := s.OnSlowWrite
+	s.mu.Unlock()
+
+	// Slow-write accounting happens outside the lock so a slow client never
+	// holds the writer mutex while the metric is recorded.
+	if err == nil && onSlow != nil && time.Since(start) >= slowWriteThreshold {
+		onSlow(time.Since(start), int64(n))
+	}
+	return err
 }
 
 // WriteDone writes the OpenAI end-of-stream sentinel.
@@ -177,10 +223,85 @@ func (s *sseWriter) WriteStreamError(err error) error {
 }
 
 // BytesWritten returns the payload size.
-func (s *sseWriter) BytesWritten() int64 { return s.bytes }
+func (s *sseWriter) BytesWritten() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bytes
+}
+
+// EventsWritten returns the number of content frames attempted.
+func (s *sseWriter) EventsWritten() int64 { return s.events.Load() }
+
+// FirstByteAt returns when the first byte reached the client, or zero when
+// nothing has been written yet.
+func (s *sseWriter) FirstByteAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstByteAt
+}
 
 // WroteHeader reports whether the status line has been committed.
-func (s *sseWriter) WroteHeader() bool { return s.wroteHeader }
+func (s *sseWriter) WroteHeader() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wroteHeader
+}
+
+// StartKeepalive emits an SSE comment every interval until the context ends
+// or StopKeepalive is called. Comments reset intermediary idle timers without
+// appearing as model output. It must only be called after the first content
+// frame: starting it earlier would commit a 200 before the provider answers
+// and turn pre-provider failures into in-stream errors.
+func (s *sseWriter) StartKeepalive(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = keepaliveInterval
+	}
+	s.keepMu.Lock()
+	if s.keepStop != nil {
+		s.keepMu.Unlock()
+		return // already running
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	s.keepStop, s.keepDone = stop, done
+	s.keepMu.Unlock()
+
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-ticker.C:
+				// A comment frame; write errors mean the client is gone, so
+				// the loop exits rather than spinning on a dead connection.
+				if err := s.WriteRaw(": ping\n\n"); err != nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+// StopKeepalive terminates the keepalive loop and waits for it, so a
+// stopped stream does not leak its goroutine. A comment already in flight
+// may still land around a terminal event; clients ignore comments, so this
+// is harmless.
+func (s *sseWriter) StopKeepalive() {
+	s.keepMu.Lock()
+	stop, done := s.keepStop, s.keepDone
+	s.keepStop, s.keepDone = nil, nil
+	s.keepMu.Unlock()
+	if stop == nil {
+		return
+	}
+	close(stop)
+	<-done
+}
 
 // parseIntParam reads an integer query parameter with a default.
 func parseIntParam(r *http.Request, name string, fallback int) int {
