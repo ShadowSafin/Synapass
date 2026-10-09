@@ -113,6 +113,11 @@ type stubAdapter struct {
 	// hangBeforeStreamChunk, when set, blocks the streaming path until the context
 	// is done, which exercises the cancellation path.
 	hangBeforeStreamChunk bool
+	// streamWords, when set, makes the streaming path emit one chunk per word
+	// with streamDelay between chunks, so tests can observe incremental
+	// delivery (first byte before completion) deterministically.
+	streamWords []string
+	streamDelay time.Duration
 	// lengthFinish makes the adapter report finish_reason "length", the way a
 	// provider does when it stopped because it hit the token ceiling. It is the
 	// signal that an answer was cut short rather than finished.
@@ -178,6 +183,15 @@ func (s *stubAdapter) response(req *providers.Request) *providers.Response {
 
 func finishReasonPtr(r domain.FinishReason) *domain.FinishReason { return &r }
 
+// joinWords concatenates streamed words the way the accumulator would.
+func joinWords(words []string) string {
+	out := ""
+	for _, w := range words {
+		out += w
+	}
+	return out
+}
+
 func (s *stubAdapter) ChatCompletion(_ context.Context, req *providers.Request) (*providers.Response, error) {
 	if err := s.enter(); err != nil {
 		return nil, err
@@ -196,6 +210,34 @@ func (s *stubAdapter) ChatCompletionStream(ctx context.Context, req *providers.R
 	}
 
 	if handler != nil {
+		if len(s.streamWords) > 0 {
+			for i, word := range s.streamWords {
+				if i > 0 && s.streamDelay > 0 {
+					select {
+					case <-ctx.Done():
+						return nil, domain.NewError(domain.ErrCodeCanceled, "the client disconnected").Wrap(ctx.Err())
+					case <-time.After(s.streamDelay):
+					}
+				}
+				chunk := providers.Chunk{ID: "cmpl-" + s.name, Model: req.Model, Index: 0,
+					Delta: domain.ChatMessage{Role: domain.RoleAssistant, Content: domain.NewTextContent(word)}}
+				if err := handler(chunk); err != nil {
+					return nil, err
+				}
+			}
+			finish := domain.FinishStop
+			if s.lengthFinish {
+				finish = domain.FinishLength
+			}
+			terminal := providers.Chunk{ID: "cmpl-" + s.name, Model: req.Model, Index: 0,
+				Delta: domain.ChatMessage{Role: domain.RoleAssistant}, FinishReason: &finish}
+			if err := handler(terminal); err != nil {
+				return nil, err
+			}
+			resp := s.response(req)
+			resp.Choices[0].Message.Content = domain.NewTextContent(joinWords(s.streamWords))
+			return resp, nil
+		}
 		finish := domain.FinishStop
 		chunks := []providers.Chunk{
 			{ID: "cmpl-" + s.name, Model: req.Model, Index: 0,
