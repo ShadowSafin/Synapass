@@ -211,11 +211,28 @@ Streamed tool-call frames have already reached the client, so a multi-step
 gateway-side run cannot be un-sent. Stream the model's tool calls and execute
 them client-side instead. See [Tools](tools.md).
 
+### A repeated stream returns instantly with the full answer
+
+That is cache replay, not a stuck provider: a cleanly completed stream is
+stored, and the repeat request replays it as SSE with
+`synapass.cache_hit: true`. To exercise the live provider path, send
+`X-Synapass-No-Cache: true`.
+
 ### Frames arrive but no `[DONE]`
 
 A proxy or ingress is buffering. Synapass sets `Cache-Control: no-cache,
 no-transform` and `X-Accel-Buffering: no`; make sure nothing in front of it
 rewrites those.
+
+### Streams stall silently for minutes
+
+Before the liveness overhaul a stalled provider burned the whole per-attempt
+budget. Now the first event must arrive within `first_token` and gaps within
+`stream_idle`, on every provider. Diagnose with
+`synapass_stream_errors_total{stage="timeout"}` and
+`synapass_stream_duration_seconds{outcome="truncated"}`; a rising
+`synapass_stream_backpressure_total` instead means the *client* side is slow
+(a buffering proxy or a slow reader), not the provider.
 
 ## Short or wrong answers
 
@@ -264,6 +281,9 @@ people out:
   `allow_nondeterministic: true`.
 - **A stale answer after a model change.** Entries are not invalidated by the
   change itself. Flush the model or provider scope.
+- **Stale tenant/catalogue reads after a write.** The write path retires the
+  affected platform entries; if a read still looks stale, flush the matching
+  scope and check the `platform` block in `GET /admin/v1/cache/stats`.
 
 ## Tools
 
