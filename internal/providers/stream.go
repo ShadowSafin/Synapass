@@ -3,8 +3,13 @@ package providers
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/shadowsafin/synapass/internal/domain"
 )
 
 // maxStreamLineBytes bounds a single stream line. Tool-call argument fragments
@@ -187,6 +192,190 @@ func atoiSafe(s string) int {
 	return n
 }
 
+// streamTimers enforces the two liveness budgets of a streaming attempt:
+//
+//	first-token: the provider must produce its first event promptly after
+//	  the upstream connection is established. A provider that accepts a
+//	  request and then stays silent is stuck, not slow.
+//	idle: the gap between successive events must stay bounded. Keepalive
+//	  comments and empty frames do not count as activity.
+//
+// All three streaming adapters share this helper so a stalled stream fails
+// fast with the same timeout semantics regardless of provider.
+//
+// The helper is safe for concurrent use: the parse loop records activity
+// while a watchdog goroutine (see livenessWatcher) polls expiry, so a stall
+// with zero bytes on the wire still aborts instead of burning the whole
+// per-attempt budget.
+type streamTimers struct {
+	mu         sync.Mutex
+	firstToken time.Duration
+	idle       time.Duration
+	start      time.Time
+	last       time.Time
+	gotFirst   bool
+}
+
+// newStreamTimers captures the budgets from the effective timeout policy.
+func newStreamTimers(t domain.TimeoutPolicy) *streamTimers {
+	now := time.Now()
+	return &streamTimers{
+		firstToken: t.FirstToken,
+		idle:       t.StreamIdle,
+		start:      now,
+		last:       now,
+	}
+}
+
+// onEvent records one meaningful event. It fails when the first event
+// arrived after the first-token budget.
+func (t *streamTimers) onEvent() *domain.Error {
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.gotFirst {
+		t.gotFirst = true
+		if t.firstToken > 0 && now.Sub(t.start) > t.firstToken {
+			return domain.NewError(domain.ErrCodeTimeout,
+				"provider did not produce output in time")
+		}
+	}
+	t.last = now
+	return nil
+}
+
+// onEmpty checks the idle budget on an empty frame (keepalive comment or
+// blank event). Content events go through onEvent instead.
+func (t *streamTimers) onEmpty() *domain.Error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.idle > 0 && time.Since(t.last) > t.idle {
+		return domain.NewError(domain.ErrCodeTimeout,
+			"stream stalled waiting for provider data")
+	}
+	return nil
+}
+
+// expired reports the liveness failure if the stream has already exceeded a
+// budget, without recording activity. The watchdog polls this while blocked
+// reads cannot.
+func (t *streamTimers) expired() *domain.Error {
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.gotFirst {
+		if t.firstToken > 0 && now.Sub(t.start) > t.firstToken {
+			return domain.NewError(domain.ErrCodeTimeout,
+				"provider did not produce output in time")
+		}
+		return nil
+	}
+	if t.idle > 0 && now.Sub(t.last) > t.idle {
+		return domain.NewError(domain.ErrCodeTimeout,
+			"stream stalled waiting for provider data")
+	}
+	return nil
+}
+
+// livenessWatcher aborts a stalled stream even when no bytes arrive.
+//
+// The parse loops block in network reads, so synchronous timer checks only
+// run when data arrives. The watcher polls timers.expired on a ticker and
+// cancels the attempt context when a budget is exceeded; cancelling aborts
+// the upstream transport, which unblocks the read with an error that the
+// loop then maps to the stored timeout (see Fired), not to a client cancel.
+type livenessWatcher struct {
+	timers *streamTimers
+	cancel context.CancelFunc
+	stop   chan struct{}
+	done   chan struct{}
+
+	mu       sync.Mutex
+	firedErr *domain.Error
+}
+
+// startLivenessWatch launches the watchdog. The caller must defer Stop.
+// A nil cancel or zero budgets leaves the watcher inert (Stop is still safe).
+func startLivenessWatch(timers *streamTimers, cancel context.CancelFunc) *livenessWatcher {
+	w := &livenessWatcher{
+		timers: timers,
+		cancel: cancel,
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+	go w.run()
+	return w
+}
+
+func (w *livenessWatcher) run() {
+	defer close(w.done)
+	if w.timers == nil || w.cancel == nil {
+		return
+	}
+	interval := watchInterval(w.timers.firstToken, w.timers.idle)
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.stop:
+			return
+		case <-ticker.C:
+			if err := w.timers.expired(); err != nil {
+				w.mu.Lock()
+				w.firedErr = err
+				w.mu.Unlock()
+				w.cancel()
+				return
+			}
+		}
+	}
+}
+
+// watchInterval polls at a quarter of the tightest budget, clamped so a
+// 90s idle budget does not wake every 22s per stream while a 50ms test
+// budget is still caught promptly.
+func watchInterval(firstToken, idle time.Duration) time.Duration {
+	best := firstToken
+	if best <= 0 || (idle > 0 && idle < best) {
+		best = idle
+	}
+	if best <= 0 {
+		return 0
+	}
+	interval := best / 4
+	if interval < 10*time.Millisecond {
+		interval = 10 * time.Millisecond
+	}
+	if interval > 5*time.Second {
+		interval = 5 * time.Second
+	}
+	return interval
+}
+
+// Stop terminates the watchdog and waits for it, so no abort can fire after
+// the attempt returned. It is idempotent-safe when called once via defer.
+func (w *livenessWatcher) Stop() {
+	if w == nil {
+		return
+	}
+	close(w.stop)
+	<-w.done
+}
+
+// Fired returns the timeout that aborted the stream, or nil when the
+// watchdog did not fire.
+func (w *livenessWatcher) Fired() *domain.Error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.firedErr
+}
+
 // streamError wraps an error returned by the caller's StreamHandler so the
 // adapter can distinguish "the consumer stopped" from "the provider failed" and
 // avoid mislabelling a client disconnect as an upstream incident.
@@ -207,4 +396,13 @@ func newStreamError(err error) error { return &streamError{err: err} }
 func isStreamError(err error) bool {
 	_, ok := err.(*streamError)
 	return ok
+}
+
+// IsConsumerError reports whether err originated from the stream consumer
+// (typically a client disconnect surfacing as a downstream write failure)
+// rather than from the provider. Adapters wrap handler errors with
+// newStreamError; this predicate lets other packages classify them without
+// depending on the unexported type.
+func IsConsumerError(err error) bool {
+	return isStreamError(err)
 }
