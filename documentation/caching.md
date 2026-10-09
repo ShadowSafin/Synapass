@@ -18,8 +18,9 @@ cache:
 
 1. Authenticate the request.
 2. Apply tenant and endpoint policy.
-3. Evaluate the cache decision — streaming, sensitivity, tools, live data,
-   determinism, policy and endpoint switches.
+3. Evaluate the cache decision — sensitivity, tools, live data,
+   determinism, policy and endpoint switches. Streams participate fully:
+   a hit replays as SSE and a clean completion is stored (see below).
 4. Compute the full cache key.
 5. Check **exact → prefix → semantic**.
 6. On a hit, return the cached response with `synapass.cache_hit: true`.
@@ -79,7 +80,6 @@ Safety first. Any of these bypasses reuse:
 | Bypass reason | Meaning |
 | --- | --- |
 | `bypass_requested` | `X-Synapass-No-Cache: true` |
-| `streaming` | Streams are never cached. |
 | `sensitive_request` | Any sensitivity label other than `public`. |
 | `policy_disabled` | The routing policy has caching off. |
 | `endpoint_cache_disabled` | An endpoint override sets `use_cache: false`. |
@@ -100,6 +100,24 @@ Two of these are tunable, and both default to the safe answer:
 
 Endpoint scopes are namespaced in the key rather than bypassed, so a scoped
 request caches safely per scope.
+
+## Streams and the cache
+
+Streams are cached — looked up like any other request, with two
+stream-specific rules:
+
+- **A hit replays the stored body as SSE** (`data: {...}` frames, then
+  `data: [DONE]`), so a repeated `stream: true` request can return instantly
+  with `synapass.cache_hit: true`. That instant second answer is reuse, not
+  a bug. Send `X-Synapass-No-Cache: true` when you want to exercise the live
+  provider path.
+- **Only a cleanly completed stream is stored**, asynchronously after
+  `[DONE]`, so storing never delays the last byte. A cancelled, errored or
+  truncated stream is never stored; a cancelled stream still records
+  estimated usage for the prefix it delivered.
+
+(A `CacheBypassStreaming` constant still exists for historical label
+compatibility, but the decision path emits no streaming bypass.)
 
 ## Policy resolution
 
@@ -151,7 +169,80 @@ removed count), publishes `ar.cache.invalidated` on NATS, bumps
 metadata for that scope.
 
 **Flush when you change** the provider, a model, a policy, tenant settings or tool
-definitions.
+definitions. Every flush is mirrored into the platform cache below, so both
+layers converge on the same write.
+
+## Platform cache
+
+Beside the response cache sits a second cache for everything else the hot
+paths read: tenant metadata, workspace metadata, route mappings, the
+provider/model catalogue, pricing snapshots, feature flags, tenant settings,
+usage aggregates, dependency health and host/path → tenant resolution.
+It is `internal/platcache`, always on, with no configuration switch: without
+Redis it runs L1 plus database fallback only, and every hook is nil-safe.
+
+### Layers
+
+| Layer | What | Lifetime |
+| --- | --- | --- |
+| **L1** | In-process memory | Ultra-short: one sixth of the family soft TTL, clamped to 2–10s, so a bad write converges almost immediately |
+| **L2** | Redis, shared across replicas | The family hard TTL below |
+| **L3** | opt-in HTTP response cache | 30s hard / 15s soft, safe `GET` endpoints only |
+
+Reads are single-flighted (one loader run per key no matter how many
+goroutines ask) and serve stale-while-revalidating past the soft TTL: a
+slow database never blocks the request, it just serves the last good value
+and refreshes in the background.
+
+### Families and keys
+
+Every key is namespaced, versioned (bumping the version retires a whole
+generation without a flush), and tenant-aware where it must be — a
+tenant-scoped write without the tenant id in the key is refused.
+
+| Family | Key shape | Hard / soft TTL |
+| --- | --- | --- |
+| Tenant metadata, routes, graph | `tenant:{id}:meta:v1`, `tenant:{id}:routes:v1`, `tenant:{id}:graph:v1` | 120s / 60s |
+| Tenant settings | `tenant:{id}:settings:v1` | 180s / 90s |
+| Workspace metadata, slug | `workspace:{id}:meta:v1`, `workspace:slug:{slug}:tenant:v1` | 120s / 60s |
+| Gateway/host resolution | `gateway:resolve:{host}:{path}:v1` | 60s / 30s |
+| Provider catalogue | `modelcatalog:providers:v3`, `modelcatalog:provider:{id}:caps:v3`, `modelcatalog:models:v3` | 15m / 5m |
+| Pricing snapshot | `modelcatalog:pricing:v3` | 30m / 10m |
+| Feature flags | `featureflags:global:v2`, `featureflags:tenant:{id}:v2` | 120s / 30s |
+| Usage aggregates | `usage:{tenant}:{window}:v1` | 30s / 10s |
+| Dependency health | `health:{dependency}:v1` | 15s / 5s |
+
+### Safety rules
+
+Enforced in code, not advisory: secrets (API keys, tokens, passwords,
+session and payment material, raw bodies, prompts and webhook payloads) are
+refused by key and payload-family screening; a Redis outage degrades reads
+to the database loader instead of failing the request; a serialization
+failure bypasses the cache for that request.
+
+### Retiring entries
+
+Explicit, on the write path, best-effort — it never fails the write that
+triggered it. L1 clears synchronously, L2 best-effort:
+
+| What changed | Platform effect |
+| --- | --- |
+| Response-cache flush, `tenant` scope | That tenant's meta, routes, settings, graph, flags, usage |
+| Response-cache flush, `provider` scope | Provider caps plus the shared catalogue |
+| Response-cache flush, `model` scope | Model list plus pricing snapshots |
+| Response-cache flush, `all` | Catalogue plus flags |
+| Response-cache flush, `key` scope | Response cache only — key material is never platform-cached |
+| Tenant created | Stale entries retired, then the new tenant's meta/settings/graph prewarmed from the just-committed rows |
+| Tenant updated or deleted | That tenant's entries retired |
+
+### Visibility
+
+`GET /admin/v1/cache/stats` carries a `platform` block beside the response
+stats: `l1_entries`, `hit_rate`, `hits`, `misses`, `stale_hits`,
+`refreshes`, `db_fallbacks`, `coalesced`, `invalidations`, plus L2
+reachability (`l2_ok`, `l2_latency_ms`, or `absent (db-fallback)` mode).
+Platform activity folds into the same `synapass_cache_*` metrics with
+`platform:`-prefixed kind/scope labels, so one dashboard covers both.
 
 ## Visibility
 
@@ -233,6 +324,9 @@ and semantic separately, watch `synapass_cache_hits_total{kind}`, and raise
 | Everything bypasses with `nondeterministic_request` | Unseeded temperature > 0 | Seed it, or set `allow_nondeterministic: true` |
 | Semantic hits look wrong | Threshold too low | Raise `semantic_threshold` toward `0.95`+ |
 | A stale answer after a model change | Entries not flushed | Flush the model or provider scope |
+| A repeated stream returns instantly | Cache replay, not a stuck provider | Check `synapass.cache_hit`; bypass with `X-Synapass-No-Cache: true` to test live |
+| Stale catalogue/tenant reads after a write | Platform entries not yet retired | They retire on the write path; flush the tenant/provider/model scope to force it, and check the `platform` block in cache stats |
+| `platform` shows L2 absent | No Redis | Expected: L1 plus database fallback; inference is unaffected |
 | Hits across tenants | Not possible by construction | Check `tenant_id` is set on the key; entries are namespaced |
 
 ---
