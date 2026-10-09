@@ -233,6 +233,18 @@ Inspect current state:
 curl -s "$GATEWAY/admin/v1/providers/health?provider_id=$ID" -H "Authorization: Bearer $SYNAPASS_ADMIN_KEY" | jq
 ```
 
+## Stream liveness
+
+Every streaming adapter (OpenAI, Anthropic, Ollama) enforces the timeout
+policy's `first_token` and `stream_idle` budgets: the first event must
+arrive within `first_token`, and no gap between events may exceed
+`stream_idle`, or the attempt fails fast with a `timeout` rather than
+burning the whole per-attempt budget. A watchdog also aborts zero-byte
+stalls where the transport itself goes quiet. Anthropic `ping` frames keep
+the connection alive but do not count as activity. Tune the budgets in the
+routing policy (`timeout.first_token`, `timeout.stream_idle`) — see
+[Routing](routing.md).
+
 ## Managing providers
 
 | Method | Path | Effect |
