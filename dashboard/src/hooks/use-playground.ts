@@ -63,6 +63,11 @@ export function usePlayground() {
   );
   const [runs, setRuns] = React.useState<PlaygroundRun[]>([]);
   const controllers = React.useRef<Partial<Record<PlaygroundLane, AbortController>>>({});
+  // First-token timing visible while a run is still in flight, so the UI can
+  // show responsiveness before the run completes and records firstTokenMs.
+  const [liveFirstTokenMs, setLiveFirstTokenMs] = React.useState<Record<PlaygroundLane, number>>(
+    () => emptyLanes(0),
+  );
 
   const cancel = React.useCallback((lane: PlaygroundLane) => {
     controllers.current[lane]?.abort();
@@ -125,6 +130,13 @@ export function usePlayground() {
     controllers.current[lane] = controller;
     setRunning((current) => ({ ...current, [lane]: true }));
     setPartial((current) => ({ ...current, [lane]: emptyStreamState() }));
+    setLiveFirstTokenMs((current) => ({ ...current, [lane]: 0 }));
+
+    // Stream progress hoisted so a cancel records what already arrived
+    // instead of discarding it: the operator read those tokens, and the
+    // gateway metered them, so the history entry must keep them.
+    let streamed = emptyStreamState();
+    let streamedFirstTokenMs = 0;
 
     try {
       const response = await fetch(RUN_ENDPOINT, {
@@ -181,8 +193,11 @@ export function usePlayground() {
               transcriptBytes += event.data.length;
             }
           }
+          streamed = state;
           if (firstTokenMs === 0 && state.content.length > 0) {
             firstTokenMs = Date.now() - startedAt;
+            streamedFirstTokenMs = firstTokenMs;
+            setLiveFirstTokenMs((current) => ({ ...current, [lane]: firstTokenMs }));
           }
           // One state update per network read rather than per frame: a fast
           // model can emit dozens of frames per read and re-rendering each one
@@ -203,7 +218,9 @@ export function usePlayground() {
           },
           usage: state.usage,
           route: state.route,
-          failure: null,
+          // A post-commit provider failure arrives as an error event before
+          // [DONE]: the run failed even though the transport completed.
+          failure: state.error,
           firstTokenMs,
           toolCalls: state.toolCalls,
           finishReason: state.finishReason,
@@ -222,11 +239,16 @@ export function usePlayground() {
       });
     } catch (cause) {
       // An aborted run is not a failure of the gateway, and saying so would send
-      // the operator looking for a bug that is not there.
+      // the operator looking for a bug that is not there. The streamed prefix
+      // is kept: it was rendered, it was metered, and the operator may want to
+      // keep or continue it.
       const aborted = cause instanceof DOMException && cause.name === 'AbortError';
       const failure: PlaygroundError = aborted
         ? {
-            message: 'the run was cancelled',
+            message:
+              streamed.content.length > 0
+                ? `the run was cancelled after ${streamed.content.length} characters`
+                : 'the run was cancelled',
             status: 0,
             code: 'playground_cancelled',
             type: 'cancelled',
@@ -241,11 +263,24 @@ export function usePlayground() {
             type: 'upstream_error',
           };
       return record({
-        content: '',
-        raw: null,
-        usage: null,
-        route: emptyStreamState().route,
+        content: aborted ? streamed.content : '',
+        raw: aborted
+          ? {
+              streamed: true,
+              cancelled: true,
+              finish_reason: streamed.finishReason,
+              usage: streamed.usage,
+              route: streamed.route,
+              tool_calls: streamed.toolCalls,
+              content: streamed.content,
+            }
+          : null,
+        usage: aborted ? streamed.usage : null,
+        route: streamed.route,
         failure,
+        firstTokenMs: streamedFirstTokenMs,
+        toolCalls: aborted ? streamed.toolCalls : [],
+        finishReason: aborted ? streamed.finishReason : '',
       });
     } finally {
       controllers.current[lane] = undefined;
@@ -253,5 +288,5 @@ export function usePlayground() {
     }
   }, []);
 
-  return { running, partial, runs, run, cancel, clearHistory };
+  return { running, partial, runs, run, cancel, clearHistory, liveFirstTokenMs };
 }
