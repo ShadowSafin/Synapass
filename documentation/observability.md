@@ -49,6 +49,18 @@ one scrape config and one dashboard cover both.
 | `synapass_provider_truncations_total` | tenant, provider, reason | **See answers cut short** by `max_tokens` or `timeout` |
 | `synapass_provider_completion_tokens_ratio` | tenant, provider | See headroom; a pile-up at `1.0` means the ceiling is too tight |
 
+### Streaming
+
+| Metric | Labels | Use it to |
+| --- | --- | --- |
+| `synapass_stream_ttft_seconds` | provider | Time from accept to first downstream byte (TTFT percentiles) |
+| `synapass_stream_first_text_seconds` | provider | Time from accept to first visible text (excludes meta-only frames) |
+| `synapass_stream_duration_seconds` | provider, outcome | Stream lifetime by `completed`, `error`, `cancelled`, `truncated` |
+| `synapass_stream_active` | - | Currently open streams (saturation, leak detection) |
+| `synapass_stream_errors_total` | provider, stage | Failures by `upstream`, `downstream`, `timeout` stage |
+| `synapass_stream_cancels_total` | provider | Client-cancelled streams (not provider faults) |
+| `synapass_stream_backpressure_total` | provider | Downstream writes slower than 500ms (slow readers, buffering proxies) |
+
 ### Routing, policy and usage
 
 | Metric | Use it to |
@@ -67,6 +79,11 @@ one scrape config and one dashboard cover both.
 `lookup_duration_seconds`, `invalidations_total{scope,reason}`,
 `latency_saved_seconds{tenant,kind}`, `semantic_similarity`. See
 [Caching](caching.md).
+
+The platform cache (tenant/catalog/route/flags) reports through the same
+metrics with `platform:`-prefixed kind and scope labels, and its health
+(L1 size, hit rate, stale hits, background refreshes, DB fallbacks, L2
+reachability) arrives in the `platform` block of `GET /admin/v1/cache/stats`.
 
 ### Intelligence
 
@@ -142,6 +159,8 @@ matter:
 | Spend anomaly | Cost rate far above baseline |
 | Telemetry loss | Async drops climbing |
 | Truncation spike | `truncations_total` climbing |
+| Stream stall spike | `stream_errors_total{stage="timeout"}` climbing — providers stalling past `first_token`/`stream_idle` |
+| Slow downstream | `stream_backpressure_total` climbing — a buffering proxy or slow reader, not the provider |
 
 Load them into your own Prometheus if you are not using the Compose one.
 
