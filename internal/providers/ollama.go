@@ -321,11 +321,18 @@ func (a *ollamaAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 	acc := newStreamAccumulator()
 	reader := newNDJSONReader(resp.Body)
 
+	timers := newStreamTimers(a.Timeout())
+	watch := startLivenessWatch(timers, cancel)
+	defer watch.Stop()
+
 	toolIndex := 0
 	var finalUsage domain.TokenUsage
 	for {
 		line, ok, err := reader.Next()
 		if err != nil {
+			if terr := watch.Fired(); terr != nil {
+				return nil, terr.WithProvider(a.Name(), req.Model, 1)
+			}
 			if ctx.Err() != nil {
 				return nil, NormalizeTransportError(a.Name(), req.Model, 1, ctx.Err())
 			}
@@ -336,12 +343,18 @@ func (a *ollamaAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 		if !ok {
 			break
 		}
+		if terr := watch.Fired(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
+		}
 
 		var parsed ollamaResponse
 		if err := decodeJSON(line, &parsed); err != nil {
 			a.logger.Debug("skipping undecodable ollama line",
 				"provider", a.Name(), "error", err)
 			continue
+		}
+		if terr := timers.onEvent(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
 		}
 		if parsed.Error != "" {
 			return nil, domain.NewError(domain.ErrCodeUpstream, parsed.Error).
