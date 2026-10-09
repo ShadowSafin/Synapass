@@ -147,6 +147,26 @@ type Metrics struct {
 	FeedbackTotal      *prometheus.CounterVec
 	ProviderScoreGauge *prometheus.GaugeVec
 
+	// Streaming metrics. Provider labels are bounded the same way as
+	// elsewhere; outcome/stage labels are closed sets.
+	// StreamTTFTSeconds observes time to first downstream byte in seconds,
+	// measured from request accept. This is the responsiveness signal.
+	StreamTTFTSeconds *prometheus.HistogramVec
+	// StreamFirstTextSeconds observes time to first visible text in seconds,
+	// measured from request accept. Headers/meta frames do not count.
+	StreamFirstTextSeconds *prometheus.HistogramVec
+	// StreamDurationSeconds observes total stream lifetime in seconds.
+	StreamDurationSeconds *prometheus.HistogramVec
+	// StreamsActive reports currently open streams.
+	StreamsActive prometheus.Gauge
+	// StreamErrorsTotal counts streams that ended in failure, by stage.
+	StreamErrorsTotal *prometheus.CounterVec
+	// StreamCancelsTotal counts client-cancelled streams.
+	StreamCancelsTotal *prometheus.CounterVec
+	// StreamBackpressureTotal counts downstream writes slower than the
+	// slow-write threshold (slow-reading clients).
+	StreamBackpressureTotal *prometheus.CounterVec
+
 	// Info exposes build and configuration identity as a labelled gauge.
 	Info *prometheus.GaugeVec
 }
@@ -429,6 +449,46 @@ func NewMetrics(cfg MetricsConfig) *Metrics {
 		Help: "Build and configuration identity; always 1.",
 	}, []string{"version", "instance", "environment", "go_version"})
 
+	ttftBuckets := []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60}
+
+	m.StreamTTFTSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "ttft_seconds",
+		Help:    "Time from request accept to first downstream byte, in seconds.",
+		Buckets: ttftBuckets,
+	}, []string{"provider"})
+
+	m.StreamFirstTextSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "first_text_seconds",
+		Help:    "Time from request accept to first visible text, in seconds.",
+		Buckets: ttftBuckets,
+	}, []string{"provider"})
+
+	m.StreamDurationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "duration_seconds",
+		Help:    "Total stream lifetime in seconds, by terminal outcome.",
+		Buckets: latencyBuckets,
+	}, []string{"provider", "outcome"})
+
+	m.StreamsActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "active",
+		Help: "Number of currently open streams.",
+	})
+
+	m.StreamErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "errors_total",
+		Help: "Streams that ended in failure, by stage (upstream, downstream, timeout).",
+	}, []string{"provider", "stage"})
+
+	m.StreamCancelsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "cancels_total",
+		Help: "Streams cancelled by the client.",
+	}, []string{"provider"})
+
+	m.StreamBackpressureTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stream", Name: "backpressure_total",
+		Help: "Downstream writes slower than the slow-write threshold.",
+	}, []string{"provider"})
+
 	registry.MustRegister(
 		m.RequestsTotal, m.RequestDuration, m.RequestsInFlight, m.RequestSize,
 		m.ResponseSize, m.ProviderAttemptsTotal, m.ProviderDuration,
@@ -444,6 +504,9 @@ func NewMetrics(cfg MetricsConfig) *Metrics {
 		m.EvalJobsTotal, m.ReplayJobsTotal, m.FeedbackTotal, m.ProviderScoreGauge,
 		m.ToolRunsTotal, m.ToolRunDuration, m.ToolInvocationsTotal, m.ToolPersistErrorsTotal,
 		m.TunnelUp, m.TunnelSessionsTotal, m.TunnelRestartsTotal,
+		m.StreamTTFTSeconds, m.StreamFirstTextSeconds, m.StreamDurationSeconds,
+		m.StreamsActive, m.StreamErrorsTotal, m.StreamCancelsTotal,
+		m.StreamBackpressureTotal,
 		m.Info,
 	)
 
@@ -776,6 +839,75 @@ func (m *Metrics) SetProviderScore(provider string, score float64) {
 		return
 	}
 	m.ProviderScoreGauge.WithLabelValues(provider).Set(score)
+}
+
+// StreamActiveInc marks one more open stream.
+func (m *Metrics) StreamActiveInc() {
+	if !m.Enabled() {
+		return
+	}
+	m.StreamsActive.Inc()
+}
+
+// StreamActiveDec marks one fewer open stream.
+func (m *Metrics) StreamActiveDec() {
+	if !m.Enabled() {
+		return
+	}
+	m.StreamsActive.Dec()
+}
+
+// ObserveStreamTTFT records time to first downstream byte in seconds.
+func (m *Metrics) ObserveStreamTTFT(provider string, seconds float64) {
+	if !m.Enabled() || m.StreamTTFTSeconds == nil || seconds < 0 {
+		return
+	}
+	m.StreamTTFTSeconds.WithLabelValues(orUnknown(provider)).Observe(seconds)
+}
+
+// ObserveStreamFirstText records time to first visible text in seconds.
+func (m *Metrics) ObserveStreamFirstText(provider string, seconds float64) {
+	if !m.Enabled() || m.StreamFirstTextSeconds == nil || seconds < 0 {
+		return
+	}
+	m.StreamFirstTextSeconds.WithLabelValues(orUnknown(provider)).Observe(seconds)
+}
+
+// ObserveStreamEnd records total stream lifetime by terminal outcome.
+// outcome is one of completed, error, cancelled, truncated.
+func (m *Metrics) ObserveStreamEnd(provider, outcome string, seconds float64) {
+	if !m.Enabled() || m.StreamDurationSeconds == nil || seconds < 0 {
+		return
+	}
+	m.StreamDurationSeconds.WithLabelValues(orUnknown(provider), orUnknown(outcome)).Observe(seconds)
+}
+
+// ObserveStreamError records a failed stream by stage: upstream (provider
+// fault or timeout) or downstream (client write failure).
+func (m *Metrics) ObserveStreamError(provider, stage string) {
+	if !m.Enabled() || m.StreamErrorsTotal == nil {
+		return
+	}
+	if stage != "upstream" && stage != "downstream" && stage != "timeout" {
+		stage = "upstream"
+	}
+	m.StreamErrorsTotal.WithLabelValues(orUnknown(provider), stage).Inc()
+}
+
+// ObserveStreamCancel records a client-cancelled stream.
+func (m *Metrics) ObserveStreamCancel(provider string) {
+	if !m.Enabled() || m.StreamCancelsTotal == nil {
+		return
+	}
+	m.StreamCancelsTotal.WithLabelValues(orUnknown(provider)).Inc()
+}
+
+// ObserveStreamBackpressure records one slow downstream write.
+func (m *Metrics) ObserveStreamBackpressure(provider string) {
+	if !m.Enabled() || m.StreamBackpressureTotal == nil {
+		return
+	}
+	m.StreamBackpressureTotal.WithLabelValues(orUnknown(provider)).Inc()
 }
 
 // ObserveToolRun records a completed bounded tool run and every call it made.
