@@ -107,6 +107,12 @@ type RequestContext struct {
 	CacheDecision *CacheDecision `json:"-"`
 	// CacheLookupMS is the cache lookup latency for observability.
 	CacheLookupMS float64 `json:"-"`
+	// StreamTextRunes counts visible-text runes delivered downstream on a
+	// streaming request. The chunk handler increments it; the error path
+	// reads it to reconcile usage for work already performed when the
+	// provider never reports final counts (cancel, timeout, disconnect).
+	// Same-goroutine use only (handler and completion tail).
+	StreamTextRunes int `json:"-"`
 }
 
 // Remaining returns the time left before the request deadline. A non-positive

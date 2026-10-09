@@ -49,7 +49,16 @@ func EstimateText(s string) int {
 	if s == "" {
 		return 0
 	}
-	runes := utf8.RuneCountInString(s)
+	return EstimateRuneCount(utf8.RuneCountInString(s))
+}
+
+// EstimateRuneCount returns the estimated token count for a rune count.
+// It shares EstimateText's formula for callers that count runes incrementally
+// (for example partial stream delivery) without retaining the text.
+func EstimateRuneCount(runes int) int {
+	if runes <= 0 {
+		return 0
+	}
 	return int(math.Ceil(float64(runes) / charsPerToken))
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shadowsafin/synapass/internal/domain"
 	"github.com/shadowsafin/synapass/internal/providers"
@@ -351,7 +352,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.runCompletion(ctx, w, rc, decision, req, *shapedBody, sse, started, debugRequested(r)); err != nil {
-		s.respondError(w, sse, rc, err, started, debugRequested(r))
+		s.respondError(ctx, w, sse, rc, err, started, debugRequested(r))
 		return
 	}
 }
@@ -398,12 +399,48 @@ func (s *Server) runCompletion(
 	debug bool,
 ) error {
 	var handler providers.StreamHandler
+	tracker := &streamTracker{}
 	if sse != nil {
-		handler = s.streamHandler(sse, rc, decision, debug)
+		handler = s.streamHandler(ctx, sse, rc, decision, debug, tracker)
+		// First visible text is observed on exit alongside TTFT.
+		defer func() {
+			if !tracker.firstTextAt.IsZero() && s.metrics != nil {
+				s.metrics.ObserveStreamFirstText(streamProvider(decision), tracker.firstTextAt.Sub(started).Seconds())
+			}
+		}()
+	}
+
+	if sse != nil {
+		s.observeStreamStart(decision)
+		defer s.observeStreamActiveEnd()
+		// Slow downstream writes (a slow reader or a buffering proxy) are
+		// counted, never retried: delivery continues at the client's pace.
+		provider := streamProvider(decision)
+		sse.OnSlowWrite = func(latency time.Duration, _ int64) {
+			if s.metrics != nil {
+				s.metrics.ObserveStreamBackpressure(provider)
+			}
+			s.logger.Debug("slow stream write (client backpressure)",
+				"request_id", rc.RequestID.String(), "latency_ms", latency.Milliseconds())
+		}
+		// The keepalive loop stops on every exit below (success, error, or
+		// panic unwind): no comment frame may follow a terminal event, and a
+		// stopped stream must not leak its goroutine.
+		defer sse.StopKeepalive()
+		// Time to first downstream byte is valid for every outcome once
+		// headers commit, so it is observed on exit rather than per path.
+		defer func() {
+			if t := sse.FirstByteAt(); !t.IsZero() && s.metrics != nil {
+				s.metrics.ObserveStreamTTFT(provider, t.Sub(started).Seconds())
+			}
+		}()
 	}
 
 	result, err := s.executor.Execute(ctx, rc, req, handler)
 	if err != nil {
+		if sse != nil {
+			s.observeStreamError(ctx, started, decision, sse, "", err)
+		}
 		return err
 	}
 
@@ -431,18 +468,31 @@ func (s *Server) runCompletion(
 		// with an extra frame.
 		if body.StreamOptions != nil && body.StreamOptions.IncludeUsage {
 			if err := sse.WriteEvent(s.usageChunk(result.Response, rc, decision, result, usage, cost, debug, completion)); err != nil {
+				s.observeStreamError(ctx, started, decision, sse, "downstream", err)
 				return err
 			}
 		}
 		if err := sse.WriteDone(); err != nil {
+			s.observeStreamError(ctx, started, decision, sse, "downstream", err)
 			return err
+		}
+		if s.metrics != nil {
+			s.metrics.ObserveStreamEnd(streamProvider(decision), "completed", time.Since(started).Seconds())
 		}
 		logTruncation(s.logger, s.metrics, rc, decision, completion, "")
 		// A cleanly completed stream is a complete response like any
 		// other: store it when the request's cache decision allows it.
 		// Failed and client-aborted streams return through respondError,
 		// never through here, so the cache cannot learn them.
-		s.storeCompletedStream(ctx, rc, decision, body, result, usage, cost, elapsed, debug)
+		//
+		// The store runs detached in the background: the bytes are already
+		// delivered, and a slow cache must not hold the connection open.
+		// Billing and audit stay synchronous in recordOutcome below.
+		go func() {
+			bctx, cancel := bookkeepingContext()
+			defer cancel()
+			s.storeCompletedStream(bctx, rc, decision, body, result, usage, cost, elapsed, debug)
+		}()
 	} else {
 		response := s.buildResponse(result.Response, rc, decision, result, usage, cost, elapsed, debug)
 		// A requested response_format is a contract, checked here rather than
@@ -1056,11 +1106,126 @@ func (s *Server) storeCompletedStream(
 	}
 }
 
+// streamTracker carries per-stream timing from the chunk handler back to
+// runCompletion. The handler and runCompletion run on the same goroutine,
+// so no synchronization is needed.
+type streamTracker struct {
+	// firstTextAt is when the first chunk carrying visible text arrived.
+	firstTextAt time.Time
+}
+
+// partialStreamUsage estimates usage from delivered text when the provider
+// never reported final counts (cancel, timeout, disconnect). Prompt tokens
+// come from the pre-request estimate; completion tokens from delivered
+// runes. The estimate is marked estimated so exact billing paths treat it
+// as such. Zero runes means nothing was delivered and usage stays zero.
+func partialStreamUsage(rc *domain.RequestContext) domain.TokenUsage {
+	if rc == nil || rc.StreamTextRunes <= 0 {
+		return domain.TokenUsage{}
+	}
+	return domain.TokenUsage{
+		PromptTokens:     rc.PromptTokens,
+		CompletionTokens: tokens.EstimateRuneCount(rc.StreamTextRunes),
+		Estimated:        true,
+	}.Normalize()
+}
+
+// streamProvider names the provider for stream metric labels. The decision's
+// chosen target is the best available pre-attempt; a failover changes the
+// serving provider, but labels stay bounded and the trace keeps the truth.
+func streamProvider(decision *domain.RouteDecision) string {
+	if decision == nil {
+		return ""
+	}
+	return decision.Chosen.ProviderName
+}
+
+// observeStreamStart marks one more open stream.
+func (s *Server) observeStreamStart(_ *domain.RouteDecision) {
+	if s.metrics != nil {
+		s.metrics.StreamActiveInc()
+	}
+}
+
+// observeStreamActiveEnd marks one fewer open stream.
+func (s *Server) observeStreamActiveEnd() {
+	if s.metrics != nil {
+		s.metrics.StreamActiveDec()
+	}
+}
+
+// observeStreamError records a failed stream with cancel/timeout/upstream/
+// downstream classification. Cancellation is a client decision, not a
+// provider fault, and timeouts after first byte are truncations, not
+// completions. A forced stage ("downstream") marks failures that by
+// construction came from client writes, e.g. terminal frames after a
+// successful attempt; "" auto-classifies from the error.
+func (s *Server) observeStreamError(ctx context.Context, started time.Time, decision *domain.RouteDecision, sse *sseWriter, stage string, err error) {
+	if s.metrics == nil {
+		return
+	}
+	provider := streamProvider(decision)
+	code := domain.AsError(err).Code
+	switch {
+	case ctx != nil && ctx.Err() != nil, code == domain.ErrCodeCanceled:
+		s.metrics.ObserveStreamCancel(provider)
+		s.metrics.ObserveStreamEnd(provider, "cancelled", time.Since(started).Seconds())
+	case code == domain.ErrCodeTimeout && sse != nil && sse.WroteHeader():
+		s.metrics.ObserveStreamError(provider, "timeout")
+		s.metrics.ObserveStreamEnd(provider, "truncated", time.Since(started).Seconds())
+	default:
+		if stage == "" {
+			stage = "upstream"
+			if sse != nil && sse.WroteHeader() && isDownstreamError(err) {
+				stage = "downstream"
+			}
+		}
+		s.metrics.ObserveStreamError(provider, stage)
+		s.metrics.ObserveStreamEnd(provider, "error", time.Since(started).Seconds())
+	}
+}
+
+// isDownstreamError reports whether err came from writing to the client
+// (a disconnect) rather than from the provider.
+func isDownstreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Handler write failures surface wrapped as consumer errors; a client
+	// that went away is a downstream stage fault, not an upstream one.
+	if providers.IsConsumerError(err) {
+		return true
+	}
+	var streamStarted *routing.StreamStartedError
+	return errors.As(err, &streamStarted) && providers.IsConsumerError(streamStarted.Err)
+}
+
 // streamHandler renders provider chunks as OpenAI-compatible SSE frames.
-func (s *Server) streamHandler(sse *sseWriter, rc *domain.RequestContext, decision *domain.RouteDecision, debug bool) providers.StreamHandler {
+func (s *Server) streamHandler(ctx context.Context, sse *sseWriter, rc *domain.RequestContext, decision *domain.RouteDecision, debug bool, tracker *streamTracker) providers.StreamHandler {
 	sentMeta := false
+	keepaliveStarted := false
 
 	return func(chunk providers.Chunk) error {
+		// Keepalives start with the first delivered chunk, never before:
+		// starting earlier would commit a 200 while the provider may still
+		// fail, turning a clean JSON error into an in-stream one.
+		if !keepaliveStarted {
+			keepaliveStarted = true
+			sse.StartKeepalive(ctx, keepaliveInterval)
+		}
+		// First visible text is a separate signal from first byte: meta-only
+		// frames commit headers without showing anything to the user.
+		// Delivered runes are also counted on the request context so a
+		// cancelled or truncated stream still reconciles usage for work
+		// already performed.
+		if text := chunk.Delta.Content.PlainText(); text != "" {
+			if tracker != nil && tracker.firstTextAt.IsZero() {
+				tracker.firstTextAt = time.Now()
+			}
+			if rc != nil {
+				rc.StreamTextRunes += utf8.RuneCountInString(text)
+			}
+		}
 		// The metadata block rides on the first frame only. Repeating it on every
 		// chunk would multiply the payload for no benefit, but including it once
 		// means a streaming client still learns the routing that was applied.
@@ -1179,6 +1344,7 @@ func (s *Server) buildResponse(
 // respondError writes a failure, choosing the right mechanism for whether the
 // response has already been committed.
 func (s *Server) respondError(
+	ctx context.Context,
 	w http.ResponseWriter,
 	sse *sseWriter,
 	rc *domain.RequestContext,
@@ -1190,6 +1356,13 @@ func (s *Server) respondError(
 	// is delivered as an error event inside the stream.
 	if sse != nil && sse.WroteHeader() {
 		normalized := domain.AsError(err)
+		// A user cancellation is recorded as cancelled, never as a success or a
+		// generic error: the client stopped the stream on purpose, the provider
+		// did not fail, and usage is reconciled for work already performed.
+		outcome := domain.OutcomeError
+		if (ctx != nil && ctx.Err() != nil) || normalized.Code == domain.ErrCodeCanceled {
+			outcome = domain.OutcomeCanceled
+		}
 		// A deadline that expires mid-stream is a truncation, not just a
 		// failure: the client holds a partial answer. It is reported as such so
 		// the metric, the log and the audit trail all say the response was cut
@@ -1207,13 +1380,16 @@ func (s *Server) respondError(
 		}
 		if s.metrics != nil {
 			s.metrics.ObserveRequest(rc.TenantID(), "", "", string(rc.RequestType),
-				domain.OutcomeError, http.StatusOK, time.Since(started).Seconds(), true)
+				outcome, http.StatusOK, time.Since(started).Seconds(), true)
 		}
 		_ = normalized
 
 		bctx, cancel := bookkeepingContext()
 		defer cancel()
-		s.recordOutcome(bctx, rc, rc.Resolution, nil, domain.TokenUsage{}, domain.Cost{}, time.Since(started), http.StatusOK, err)
+		// Usage reconciles work already performed: provider-reported counts
+		// never arrive for a cancelled stream, so the delivered-text
+		// estimate stands in (marked estimated) rather than recording zero.
+		s.recordOutcome(bctx, rc, rc.Resolution, nil, partialStreamUsage(rc), domain.Cost{}, time.Since(started), http.StatusOK, err)
 		return
 	}
 
@@ -1614,7 +1790,7 @@ func (s *Server) runToolCompletion(
 	})
 
 	if run == nil {
-		s.respondError(w, nil, rc,
+		s.respondError(ctx, w, nil, rc,
 			domain.NewError(domain.ErrCodeInternal, "the tool run produced no result"),
 			started, debug)
 		return
