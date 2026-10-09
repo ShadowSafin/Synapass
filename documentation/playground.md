@@ -161,7 +161,18 @@ Both modes go through the same run path.
 Either way the final message is preserved, and **Cancel** aborts the fetch, which
 the proxy propagates to the gateway via `request.signal` — so generation actually
 stops upstream instead of the UI merely abandoning the response. A cancelled run
-is recorded as cancelled, not as a gateway failure.
+is recorded as cancelled, not as a gateway failure, and **keeps the partial
+answer it had already received** under a "Run stopped" card rather than
+discarding it. In compare mode each lane has its own Stop button, and `Esc`
+cancels a run in flight. A duplicate submit while a run is active is ignored,
+so double-clicking Run cannot fork a run against itself.
+
+While a stream is open the viewer shows a live first-token chip from the
+moment the first frame arrives; completed turns are memoized so a fast stream
+does not re-render finished answers on every chunk. Partial text is
+copyable mid-stream, fenced code blocks have their own copy button, and an
+`event: error` frame from the gateway surfaces as a failure card with a
+Retry button rather than a truncated success.
 
 ## Reading a run
 
@@ -248,7 +259,9 @@ Failures are shown as prominently as successes, with status code, error code,
 error type and the gateway's message, plus a next step specific to the code:
 unknown model, disabled endpoint scope, rejected key, rate limit, budget blocked,
 all candidates failed, unreachable gateway. An unrecognised code still gets its
-message and status — guessing at a cause would be worse than silence.
+message and status — guessing at a cause would be worse than silence. Error
+and cancelled cards carry **Retry**, which re-sends the same conversation
+without rebuilding it.
 
 ## Security surface, summarised
 
