@@ -62,6 +62,28 @@ function Inlines({ nodes }: { nodes: MdInline[] }) {
   );
 }
 
+function CopyCode({ text }: { text: string }) {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <button
+      type="button"
+      title={copied ? 'Copied' : 'Copy code'}
+      aria-label={copied ? 'Copied' : 'Copy code'}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => undefined);
+      }}
+      className="rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground transition-colors hover:bg-white/10 hover:text-neutral-100"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
 const HEADING_SIZE: Record<number, string> = {
   1: 'text-lg',
   2: 'text-base',
@@ -93,11 +115,12 @@ function Block({ block }: { block: MdBlock }) {
     case 'code':
       return (
         <div className="my-3 overflow-hidden rounded-lg border border-white/[0.08] bg-black/40">
-          {block.language ? (
-            <p className="border-b border-white/[0.07] px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-              {block.language}
+          <div className="flex items-center justify-between border-b border-white/[0.07] px-3 py-1">
+            <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              {block.language || 'code'}
             </p>
-          ) : null}
+            <CopyCode text={block.value} />
+          </div>
           <pre className="overflow-x-auto p-3">
             <code className="font-mono text-xs leading-relaxed text-neutral-200">
               {block.value}

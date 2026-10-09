@@ -203,7 +203,7 @@ export function PlaygroundView() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 
-  const { running, partial, runs, run, cancel, clearHistory } = usePlayground();
+  const { running, partial, runs, run, cancel, clearHistory, liveFirstTokenMs } = usePlayground();
 
   // Guards late completions: starting a new chat (or loading history) while a
   // run is in flight must not append that run's answer to the fresh thread.
@@ -220,6 +220,22 @@ export function PlaygroundView() {
     const id = window.setInterval(() => setElapsed(Date.now() - started), 120);
     return () => window.clearInterval(id);
   }, [running.primary, running.compare]);
+
+  // Escape stops generation like the Cancel button does. Ignored when
+  // nothing is running or when focus is in a select/menu.
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (!(running.primary || running.compare)) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'SELECT' || target.tagName === 'OPTION')) return;
+      event.preventDefault();
+      cancel('primary');
+      cancel('compare');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [running.primary, running.compare, cancel]);
 
   const gatewayUrl = useGatewayUrl();
   const latest = React.useMemo(() => {
@@ -376,6 +392,9 @@ export function PlaygroundView() {
   const onComposerSubmit = React.useCallback(
     (text: string, meta: { model: string; effort: string; attachments: File[] }) => {
       setNotice(null);
+      // A run is already in flight: submitting again would start a duplicate
+      // generation on the same lane and orphan the first controller.
+      if (running.primary || running.compare) return;
       // In compare mode the lane A picker above the composer owns the model —
       // the composer's hidden menu keeps a stale copy that must not win.
       const chosen = meta.model.trim();
@@ -424,7 +443,7 @@ export function PlaygroundView() {
         setMetaById((current) => ({ ...current, [assistant.id]: metaFor(entry) }));
       });
     },
-    [apiKey, compareOn, config, messages, missingKey, run, withTarget],
+    [apiKey, compareOn, config, messages, missingKey, run, running.compare, running.primary, withTarget],
   );
 
   const compareConfig = React.useMemo(() => withTarget(config), [config, withTarget]);
@@ -480,9 +499,10 @@ export function PlaygroundView() {
   const onRerun = React.useCallback(
     (item: PlaygroundRun) => {
       if (!apiKey.trim()) return;
+      if (running.primary || running.compare) return;
       void run({ lane: item.lane, config: item.config, messages: item.messages, apiKey });
     },
-    [apiKey, run],
+    [apiKey, run, running.primary, running.compare],
   );
 
   const onNewChat = React.useCallback(() => {
@@ -567,10 +587,15 @@ export function PlaygroundView() {
             streaming={compareOn ? false : running.primary}
             streamContent={compareOn ? '' : partial.primary.content}
             streamTools={compareOn ? [] : partial.primary.toolCalls}
+            streamFirstTokenMs={compareOn ? 0 : liveFirstTokenMs.primary}
             failedRun={compareOn ? null : failedRun}
             metaById={metaById}
             onDelete={onDeleteMessage}
+            onRetry={
+              failedRun && !isBusy ? () => onRerun(failedRun) : undefined
+            }
             disabled={isBusy}
+            retryDisabled={isBusy || missingKey}
           />
         ) : null}
 
@@ -677,9 +702,22 @@ export function PlaygroundView() {
         <div className="mx-auto w-full max-w-5xl space-y-4 px-4 pb-10 sm:px-6">
           <div className="grid gap-4">
             <div className="space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-800/70">
-                Lane A · {config.model || 'no model'}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-800/70">
+                  Lane A · {config.model || 'no model'}
+                </p>
+                {running.primary ? (
+                  <button
+                    type="button"
+                    onClick={() => cancel('primary')}
+                    title="Stop lane A"
+                    className="flex h-6 items-center gap-1 rounded-full bg-rose-950/90 px-2 text-[10px] font-medium text-white transition-colors hover:bg-rose-900"
+                  >
+                    <Square className="size-2.5" />
+                    Stop A
+                  </button>
+                ) : null}
+              </div>
               <ResponsePanel
                 config={config}
                 messages={messages}
@@ -688,12 +726,29 @@ export function PlaygroundView() {
                 running={running.primary}
                 run={latest.primary}
                 elapsedMs={elapsed}
+                firstTokenMs={liveFirstTokenMs.primary}
+                onRetry={
+                  latest.primary?.error && !isBusy ? () => onRerun(latest.primary as PlaygroundRun) : undefined
+                }
               />
             </div>
             <div className="space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-800/70">
-                Lane B · {compareConfig.model || 'no model'}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-800/70">
+                  Lane B · {compareConfig.model || 'no model'}
+                </p>
+                {running.compare ? (
+                  <button
+                    type="button"
+                    onClick={() => cancel('compare')}
+                    title="Stop lane B"
+                    className="flex h-6 items-center gap-1 rounded-full bg-rose-950/90 px-2 text-[10px] font-medium text-white transition-colors hover:bg-rose-900"
+                  >
+                    <Square className="size-2.5" />
+                    Stop B
+                  </button>
+                ) : null}
+              </div>
               <ResponsePanel
                 config={compareConfig}
                 messages={messages}
@@ -702,6 +757,10 @@ export function PlaygroundView() {
                 running={running.compare}
                 run={latest.compare}
                 elapsedMs={elapsed}
+                firstTokenMs={liveFirstTokenMs.compare}
+                onRetry={
+                  latest.compare?.error && !isBusy ? () => onRerun(latest.compare as PlaygroundRun) : undefined
+                }
               />
             </div>
           </div>

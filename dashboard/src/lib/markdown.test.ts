@@ -79,6 +79,39 @@ describe('parseMarkdown', () => {
     expect(blocks[1]).toEqual({ type: 'code', language: 'go', value: 'func main() {' });
   });
 
+  it('renders every streaming prefix of a fenced block without throwing', () => {
+    const full = 'Answer:\n\n```python\nprint("hello")\n```\n\nDone.';
+    for (let end = 1; end <= full.length; end += 7) {
+      const prefix = full.slice(0, end);
+      let blocks;
+      expect(() => {
+        blocks = parseMarkdown(prefix);
+      }).not.toThrow();
+      expect(Array.isArray(blocks)).toBe(true);
+    }
+    expect(parseMarkdown(full)).toEqual([
+      {
+        type: 'paragraph',
+        children: [{ type: 'text', value: 'Answer:' }],
+      },
+      { type: 'code', language: 'python', value: 'print("hello")' },
+      {
+        type: 'paragraph',
+        children: [{ type: 'text', value: 'Done.' }],
+      },
+    ]);
+  });
+
+  it('keeps code readable while the fence is still open', () => {
+    const blocks = parseMarkdown('```js\nconst x = 1;\nconst y = 2;');
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'code', language: 'js' });
+    if (blocks[0]?.type === 'code') {
+      expect(blocks[0].value).toContain('const x = 1;');
+      expect(blocks[0].value).toContain('const y = 2;');
+    }
+  });
+
   it('parses ordered and unordered lists', () => {
     const unordered = parseMarkdown('- one\n- two');
     expect(unordered).toHaveLength(1);
