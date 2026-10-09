@@ -544,6 +544,10 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 	reader := newSSEReader(resp.Body)
 	defer reader.Close()
 
+	timers := newStreamTimers(a.Timeout())
+	watch := startLivenessWatch(timers, cancel)
+	defer watch.Stop()
+
 	// Anthropic reports the prompt token count once, at message_start, and the
 	// output count at message_delta, so both are collected and combined.
 	usage := domain.TokenUsage{}
@@ -556,6 +560,9 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 	for {
 		event, ok, err := reader.Next()
 		if err != nil {
+			if terr := watch.Fired(); terr != nil {
+				return nil, terr.WithProvider(a.Name(), req.Model, 1)
+			}
 			if ctx.Err() != nil {
 				return nil, NormalizeTransportError(a.Name(), req.Model, 1, ctx.Err())
 			}
@@ -566,7 +573,13 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 		if !ok {
 			break
 		}
+		if terr := watch.Fired(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
+		}
 		if event.empty() || event.done() {
+			if terr := timers.onEmpty(); terr != nil {
+				return nil, terr.WithProvider(a.Name(), req.Model, 1)
+			}
 			continue
 		}
 
@@ -575,6 +588,15 @@ func (a *anthropicAdapter) ChatCompletionStream(ctx context.Context, req *Reques
 			a.logger.Debug("skipping undecodable anthropic event",
 				"provider", a.Name(), "error", err)
 			continue
+		}
+		// Ping keepalives prove the connection is alive but are not model
+		// output: they must neither satisfy the first-token budget nor
+		// extend the idle window.
+		if ev.Type == "ping" {
+			continue
+		}
+		if terr := timers.onEvent(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
 		}
 
 		switch ev.Type {
