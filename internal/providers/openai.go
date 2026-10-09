@@ -310,12 +310,18 @@ func (a *openAIAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 	reader := newSSEReader(resp.Body)
 	defer reader.Close()
 
-	idle := a.Timeout().StreamIdle
-	var lastActivity = time.Now()
+	timers := newStreamTimers(a.Timeout())
+	// The watchdog aborts stalls with zero bytes on the wire; the
+	// synchronous checks below only run when data arrives.
+	watch := startLivenessWatch(timers, cancel)
+	defer watch.Stop()
 
 	for {
 		event, ok, err := reader.Next()
 		if err != nil {
+			if terr := watch.Fired(); terr != nil {
+				return nil, terr.WithProvider(a.Name(), req.Model, 1)
+			}
 			if ctx.Err() != nil {
 				return nil, NormalizeTransportError(a.Name(), req.Model, 1, ctx.Err())
 			}
@@ -329,19 +335,22 @@ func (a *openAIAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 		if !ok {
 			break
 		}
+		// A stall that ends in a close is still a stall, not a clean end:
+		// the provider went silent past the idle budget instead of
+		// terminating the stream.
+		if terr := watch.Fired(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
+		}
 		if event.empty() {
 			// Keepalive comments must not extend the idle window forever.
-			if idle > 0 && time.Since(lastActivity) > idle {
-				return nil, domain.NewError(domain.ErrCodeTimeout,
-					"stream stalled waiting for provider data").
-					WithProvider(a.Name(), req.Model, 1)
+			if terr := timers.onEmpty(); terr != nil {
+				return nil, terr.WithProvider(a.Name(), req.Model, 1)
 			}
 			continue
 		}
 		if event.done() {
 			break
 		}
-		lastActivity = time.Now()
 
 		var chunk openAIResponse
 		if err := decodeJSON([]byte(event.Data), &chunk); err != nil {
@@ -352,6 +361,9 @@ func (a *openAIAdapter) ChatCompletionStream(ctx context.Context, req *Request, 
 			a.logger.Debug("skipping undecodable stream chunk",
 				"provider", a.Name(), "error", err, "data", truncateMessage(event.Data, 200))
 			continue
+		}
+		if terr := timers.onEvent(); terr != nil {
+			return nil, terr.WithProvider(a.Name(), req.Model, 1)
 		}
 
 		if chunk.ID != "" {
