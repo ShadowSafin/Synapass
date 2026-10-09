@@ -472,10 +472,12 @@ export function extractRoute(payload: unknown): PlaygroundRoute {
   };
 }
 
-/** One parsed `data:` frame from the event stream. */
+/** One parsed SSE frame from the event stream. */
 export interface SseEvent {
   /** The raw JSON text, or '[DONE]'. */
   data: string;
+  /** The `event:` name when the gateway set one (`error` for post-commit failures). */
+  event?: string;
 }
 
 /**
@@ -494,12 +496,21 @@ export function parseSseChunk(buffer: string): { events: SseEvent[]; rest: strin
   const rest = parts.pop() ?? '';
   for (const part of parts) {
     const dataLines: string[] = [];
+    let eventName = '';
     for (const line of part.split('\n')) {
       if (line.startsWith('data:')) {
         dataLines.push(line.slice(5).trimStart());
+      } else if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim();
       }
+      // Comment lines (`: ping` keepalives) carry no payload and are
+      // skipped: they must not look like model output.
     }
-    if (dataLines.length > 0) events.push({ data: dataLines.join('\n') });
+    if (dataLines.length > 0) {
+      const frame: SseEvent = { data: dataLines.join('\n') };
+      if (eventName) frame.event = eventName;
+      events.push(frame);
+    }
   }
   return { events, rest };
 }
@@ -571,6 +582,12 @@ export interface StreamState {
   done: boolean;
   finishReason: string;
   toolCalls: PlaygroundToolCall[];
+  /**
+   * A post-commit failure delivered as an `event: error` frame (or an error
+   * envelope in a data frame). Without this, a stream that fails halfway
+   * would read as a truncated success once `[DONE]` arrives.
+   */
+  error: PlaygroundError | null;
 }
 
 export function emptyStreamState(): StreamState {
@@ -581,6 +598,7 @@ export function emptyStreamState(): StreamState {
     done: false,
     finishReason: '',
     toolCalls: [],
+    error: null,
   };
 }
 
@@ -606,6 +624,20 @@ export function applySseEvent(state: StreamState, event: SseEvent): StreamState 
   if (!record) return state;
 
   const next: StreamState = { ...state };
+
+  // A post-commit failure arrives as `event: error` with an error envelope
+  // in the data frame. It must be recorded: the terminating `[DONE]` that
+  // follows would otherwise make a failed stream read as a truncated
+  // success. Content accumulated so far is kept.
+  const envelope = asRecord(record.error);
+  if (event.event === 'error' || envelope) {
+    next.error = {
+      message: asString(envelope?.message) || 'the stream failed after it started',
+      status: 0,
+      code: asString(envelope?.code) || 'upstream_error',
+      type: asString(envelope?.type) || 'upstream_error',
+    };
+  }
 
   const usage = extractUsage(payload);
   if (usage) next.usage = usage;

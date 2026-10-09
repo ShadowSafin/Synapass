@@ -403,6 +403,28 @@ describe('parseSseChunk', () => {
     const { events } = parseSseChunk('data: [DONE]\n\n');
     expect(events[0]?.data).toBe('[DONE]');
   });
+
+  it('captures the event name and skips keepalive comments', () => {
+    const { events, rest } = parseSseChunk(
+      ': ping\n\nevent: error\ndata: {"error":{"message":"boom"}}\n\n',
+    );
+    expect(rest).toBe('');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.event).toBe('error');
+    expect(events[0]?.data).toBe('{"error":{"message":"boom"}}');
+  });
+
+  it('reassembles a frame split inside a multibyte character', () => {
+    // Mirrors the hook: one TextDecoder in streaming mode across reads, so a
+    // UTF-8 sequence split across network chunks decodes whole.
+    const text = 'wörld 🌊';
+    const bytes = new TextEncoder().encode(`data: {"t":"${text}"}\n\n`);
+    const decoder = new TextDecoder();
+    const first = parseSseChunk(decoder.decode(bytes.slice(0, 20), { stream: true }));
+    expect(first.events).toHaveLength(0);
+    const second = parseSseChunk(`${first.rest}${decoder.decode(bytes.slice(20), { stream: true })}`);
+    expect(second.events[0]?.data).toBe(`{"t":"${text}"}`);
+  });
 });
 
 describe('applySseEvent', () => {
@@ -482,6 +504,64 @@ describe('applySseEvent', () => {
     });
     expect(before.content).toBe('');
     expect(after.content).toBe('x');
+  });
+
+  it('records a post-commit error event without losing the partial answer', () => {
+    let state = applySseEvent(emptyStreamState(), {
+      data: JSON.stringify({ choices: [{ delta: { content: 'partial' } }] }),
+    });
+    state = applySseEvent(state, {
+      event: 'error',
+      data: JSON.stringify({ error: { message: 'provider exploded', code: 'upstream_error', type: 'upstream_error' } }),
+    });
+    expect(state.content).toBe('partial');
+    expect(state.error).toMatchObject({ message: 'provider exploded', code: 'upstream_error' });
+    state = applySseEvent(state, { data: '[DONE]' });
+    expect(state.done).toBe(true);
+    expect(state.error?.code).toBe('upstream_error');
+  });
+
+  it('records an error envelope even without the event name', () => {
+    const state = applySseEvent(emptyStreamState(), {
+      data: JSON.stringify({ error: { message: 'stalled', code: 'timeout', type: 'timeout' } }),
+    });
+    expect(state.error).toMatchObject({ message: 'stalled', code: 'timeout' });
+  });
+
+  it('merges concurrent tool calls by index', () => {
+    let state = emptyStreamState();
+    state = applySseEvent(state, {
+      data: JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'a', type: 'function', function: { name: 'alpha', arguments: '' } },
+                { index: 1, id: 'b', type: 'function', function: { name: 'beta', arguments: '' } },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+    state = applySseEvent(state, {
+      data: JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, function: { arguments: '{"x":1}' } },
+                { index: 1, function: { arguments: '{"y":2}' } },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+    expect(state.toolCalls).toEqual([
+      { name: 'alpha', arguments: '{"x":1}' },
+      { name: 'beta', arguments: '{"y":2}' },
+    ]);
   });
 });
 
