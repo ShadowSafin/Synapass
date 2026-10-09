@@ -209,6 +209,15 @@ Standard `text/event-stream` with `data: {...}\n\n` frames and a terminal
 `data: [DONE]`. The response sets `Cache-Control: no-cache, no-transform` and
 `X-Accel-Buffering: no` so intermediaries do not buffer the stream.
 
+During long idle stretches the gateway emits `: ping` comment frames (every
+15s). Comments reset proxy idle timers and are ignored by SSE parsers, so
+they never appear as model output.
+
+Liveness is enforced per attempt on every provider: the first event must
+arrive within the `first_token` budget and the gap between events within
+`stream_idle`, otherwise the stream fails fast with a `timeout` error rather
+than burning the whole per-attempt budget.
+
 Provider attribution is deliberately **absent from the first frame**: the first
 token can arrive before the attempt has finished, so claiming a provider there
 would be a guess. `routed_model` and `requested_model` are present (they come
@@ -227,6 +236,11 @@ data: [DONE]
 
 A client that understands named SSE events sees a clean error; one that does not
 still sees a terminated stream rather than a hang.
+
+A client that disconnects mid-stream cancels the upstream attempt: the
+gateway stops reading the provider, records estimated usage for the prefix
+it delivered, and counts the stream under
+`synapass_stream_cancels_total` rather than as a provider fault.
 
 #### Truncated answers
 
@@ -424,9 +438,9 @@ Common query parameters:
 | `GET` | `/audit` | Administrative events, filterable by `tenant_id` and `resource`. |
 | `GET` | `/requests/{requestID}/explain` | Routing explanation: task, policy verdict, shaping, cache, scores and rejections. |
 | `GET` | `/scores` | Explainable provider and model scores with blended [0,1] ranks. |
-| `GET` | `/cache/stats?tenant_id=` | Exact/prefix/semantic hits, bypasses by reason, reuse count, latency saved, top prompts and effective config (Phase 5). |
+| `GET` | `/cache/stats?tenant_id=` | Exact/prefix/semantic hits, bypasses by reason, reuse count, latency saved, top prompts and effective config, plus a `platform` block (L1 size, hit rate, stale hits, refreshes, DB fallbacks, L2 reachability). |
 | `GET` | `/cache/inspect?tenant_id=&model=&provider=&limit=` | Entry metadata for the dashboard (no bodies; bodies stay in Redis). |
-| `POST` | `/cache/invalidate` | Scoped flush with scope, tenant_id, model, provider, key and reason. Tenant flushes are namespace-isolated; every flush is audited and published on NATS. |
+| `POST` | `/cache/invalidate` | Scoped flush with scope, tenant_id, model, provider, key and reason. Tenant flushes are namespace-isolated; every flush is audited and published on NATS. The flush is mirrored into the platform cache (tenant/provider/model/all scopes; `key` stays response-cache-only). |
 | `GET` | `/cache/policies?tenant_id=` | Per-scope cache rules (key over endpoint over tenant over global). |
 | `PUT` | `/cache/policies` | Upsert a cache rule (name, ttl_seconds, enabled, scopes). |
 | `DELETE` | `/cache/policies/{id}` | Delete a cache rule. |
