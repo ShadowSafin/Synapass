@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 import { Button } from './button';
+import { DotPattern } from './dot-pattern';
 import { Skeleton } from './skeleton';
 
 /**
@@ -89,11 +90,14 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn('flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.015] p-10 text-center', className)}>
-      <Inbox className="size-6 text-neutral-500" />
-      <p className="text-sm font-medium text-white">{title}</p>
-      {description ? <p className="max-w-md text-xs text-neutral-400">{description}</p> : null}
-      {action ? <div className="mt-2">{action}</div> : null}
+    <div className={cn('relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.015] p-10 text-center', className)}>
+      <DotPattern className="fill-white/[0.05] [mask-image:radial-gradient(320px_circle_at_center,white,transparent)]" />
+      <div className="relative z-10 flex flex-col items-center gap-2">
+        <Inbox className="size-6 text-neutral-500" />
+        <p className="text-sm font-medium text-white">{title}</p>
+        {description ? <p className="max-w-md text-xs text-neutral-400">{description}</p> : null}
+        {action ? <div className="mt-2">{action}</div> : null}
+      </div>
     </div>
   );
 }

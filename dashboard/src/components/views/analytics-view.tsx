@@ -35,6 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { WidgetBoard } from '@/components/views/widget-board';
+import { RequestRhythmCard } from '@/components/views/request-rhythm-card';
 import {
   useAnalyticsReport,
   useCacheStats,
@@ -485,6 +486,9 @@ export function AnalyticsView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Daily rhythm: streaks and quiet days as a calendar. */}
+      <RequestRhythmCard tenantId={tenantId} />
 
       {/* Latency + outcomes */}
       <div className="grid gap-4 xl:grid-cols-2">

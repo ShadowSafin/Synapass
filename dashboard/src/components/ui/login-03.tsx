@@ -14,6 +14,8 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+import { DotPattern } from './dot-pattern';
+
 const ENTER =
   'animate-in fade-in slide-in-from-bottom-4 duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none';
 
@@ -120,6 +122,7 @@ export function Login03({
         />
 
         <div className="absolute inset-0">
+          <DotPattern className="fill-white/[0.05] [mask-image:radial-gradient(480px_circle_at_center,white,transparent)]" />
           <FloatingPaths position={1} />
           <FloatingPaths position={-1} />
         </div>
