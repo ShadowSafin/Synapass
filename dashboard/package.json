@@ -4,9 +4,9 @@
   "private": true,
   "description": "Synapass control-plane dashboard: usage, providers, models, policies, budgets and keys.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

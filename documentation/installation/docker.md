@@ -188,8 +188,33 @@ key orphans stored secrets and they must be re-saved.
 
 ## Exposing it outside your host
 
-Compose publishes ports on the host's loopback interface only. To reach the
-gateway from elsewhere:
+### LAN access (other devices on the same network)
+
+The dashboard listens on the LAN by default: open `http://<lan-ip>:3000`
+from a phone or another computer (find the IP with `ipconfig` on Windows or
+`hostname -I` on Linux). `http://localhost:3000` keeps working on the host
+itself. No extra setting is needed; the dashboard proxies the admin API
+server-side, so its pages work over LAN out of the box. If the OS firewall
+prompts, allow Node.js / Docker access for private networks.
+
+To reach the gateway API from LAN devices too (e.g. the curl examples on the
+Endpoints page), two more steps are required — the gateway serves
+unauthenticated inference, so do this only behind a firewall:
+
+```dotenv
+GATEWAY_BIND=0.0.0.0
+SYNAPASS_HTTP_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.20:3000
+```
+
+with `192.168.1.20` replaced by this machine's LAN IP. `GATEWAY_LAN_URL`
+(e.g. `http://192.168.1.20:8080`) controls the LAN address shown on the
+Endpoints page; `.\scripts\up.ps1` / `scripts/deploy.ps1` detect it
+automatically on Windows.
+
+### Public access
+
+The gateway publishes on the host's loopback interface only (the dashboard is
+the LAN exception above). To reach the gateway from elsewhere:
 
 - **[Cloudflare tunnel](cloudflare-tunnel.md)** — a temporary public URL, no
   port forwarding, no DNS. Best for demos and phones.

@@ -173,6 +173,10 @@ function Invoke-Up {
   Write-Host "  Synapass is up"
   Write-Host "========================================"
   Write-Host "  Dashboard   http://127.0.0.1:3000"
+  try {
+    $DashLan = Get-LanIPv4
+    if ($DashLan) { Write-Host "  Dashboard (LAN) http://${DashLan}:3000  (other devices on this network)" }
+  } catch { }
   Write-Host "  Gateway     http://127.0.0.1:$GwPort  (/health /ready /metrics)"
   Write-Host "  Grafana     http://127.0.0.1:3001  (admin / value of GRAFANA_PASSWORD in .env)"
   Write-Host "  Prometheus  http://127.0.0.1:9090"

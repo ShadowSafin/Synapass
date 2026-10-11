@@ -50,6 +50,19 @@ port_in_use() { # $1=port
   (echo > "/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
 }
 
+# Detect the machine's current LAN IPv4 for the summary line (best effort,
+# never fails the deploy). Prefers the source address of the default route.
+detect_lan_ip() {
+  local ip=""
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | grep -oP '(?<=src )\d+\.\d+\.\d+\.\d+' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|169\.254\.)' | head -n1 || true)"
+  fi
+  printf '%s' "$ip"
+}
+
 need_cmd() { # $1=cmd [$2=hint]
   command -v "$1" >/dev/null 2>&1 || fail "missing required tool: $1. ${2:-Install it and re-run.}"
 }
@@ -171,12 +184,16 @@ wait_ready() {
 }
 
 print_summary() {
-  local gw_port
+  local gw_port lan_ip
   gw_port="$(env_get GATEWAY_PORT 8080)"
+  lan_ip="$(detect_lan_ip)"
   printf '\n========================================\n'
   printf '  Synapass is up\n'
   printf '========================================\n'
   printf '  Dashboard   http://127.0.0.1:3000\n'
+  if [ -n "$lan_ip" ]; then
+    printf '  Dashboard (LAN) http://%s:3000  (other devices on this network)\n' "$lan_ip"
+  fi
   printf '  Gateway     http://127.0.0.1:%s  (/health /ready /metrics)\n' "$gw_port"
   printf '  Grafana     http://127.0.0.1:3001  (admin / value of GRAFANA_PASSWORD in .env)\n'
   printf '  Prometheus  http://127.0.0.1:9090\n'

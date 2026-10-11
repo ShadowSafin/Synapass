@@ -29,9 +29,12 @@
 #     service_healthy` is what makes `up` reliable rather than a race.
 #   * Named volumes hold all state. `docker compose down` removes containers and
 #     keeps data; `down -v` is the explicit reset.
-#   * Ports are bound to 127.0.0.1 by default so a developer laptop is not
+#   * Ports: the gateway binds 127.0.0.1 by default so a developer laptop is not
 #     accidentally exposing an unauthenticated inference endpoint. Change to
-#     "0.0.0.0:8080" for a real deployment behind a firewall.
+#     "0.0.0.0:8080" for a real deployment behind a firewall. The dashboard is
+#     the exception: it requires a console login, so it binds 0.0.0.0 by
+#     default and is reachable from other devices on your LAN
+#     (http://<lan-ip>:3000) as well as from localhost.
 #   * Resource limits are set on the gateway. An unbounded gateway under a traffic
 #     spike takes down the database on the same host, which is the single most
 #     common self-hosting failure.
@@ -282,7 +285,11 @@ services:
       # the LAN block. Requires the gateway to bind your network (GATEWAY_BIND).
       GATEWAY_LAN_URL: ${GATEWAY_LAN_URL:-}
     ports:
-      - "${DASHBOARD_BIND:-127.0.0.1}:3000:3000"
+      # The dashboard requires a console login, so it listens on the LAN by
+      # default: http://localhost:3000 on this machine and
+      # http://<lan-ip>:3000 from phones and other devices. Set
+      # DASHBOARD_BIND=127.0.0.1 to keep it loopback-only.
+      - "${DASHBOARD_BIND:-0.0.0.0}:3000:3000"
 
   # ---------------------------------------------------------------------------
   # Observability

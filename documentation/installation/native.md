@@ -286,9 +286,18 @@ With the standalone build:
 NODE_ENV=production \
 SYNAPASS_API_URL=http://127.0.0.1:8080 \
 SYNAPASS_ADMIN_KEY=... \
-PORT=3000 HOSTNAME=127.0.0.1 \
+PORT=3000 HOSTNAME=0.0.0.0 \
 node dashboard/.next/standalone/server.js
 ```
+
+`synapass native up` binds the dashboard to `0.0.0.0` by default, so the
+console is reachable from other devices on the same network at
+`http://<lan-ip>:3000` as well as from `http://localhost:3000` on the host.
+The surface is authenticated (console login), unlike the gateway's
+unauthenticated inference endpoint. Use `--dashboard-host 127.0.0.1` (or
+`HOSTNAME=127.0.0.1`) for loopback-only, and allow port 3000 through the OS
+firewall when prompted. For `npm run dev` in a checkout, the dev script
+already binds `0.0.0.0` with the same LAN behavior.
 
 As a service, with the same sandbox posture as the gateway unit:
 
@@ -299,8 +308,9 @@ sudo systemctl enable --now synapass-dashboard
 ```
 
 It reads the same `/etc/synapass/native.env` for `SYNAPASS_API_URL`,
-`SYNAPASS_ADMIN_KEY` and `PORT`, binds loopback by default, and needs no
-writable paths.
+`SYNAPASS_ADMIN_KEY` and `PORT`, binds loopback as a service by default
+(`HOSTNAME=127.0.0.1` in the unit; set `HOSTNAME=0.0.0.0` in native.env for
+LAN), and needs no writable paths.
 
 ## Cloudflare tunnel
 

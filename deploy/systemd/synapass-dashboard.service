@@ -22,7 +22,10 @@
 #   PORT                listen port (3000)
 #
 # Put a reverse proxy in front and terminate TLS there; this unit binds
-# loopback by default (HOSTNAME below).
+# loopback by default (HOSTNAME below). For LAN access without a proxy, set
+# HOSTNAME=0.0.0.0 in /etc/synapass/native.env (the dashboard requires a
+# console login, so the LAN surface is authenticated) and allow port 3000
+# through the host firewall.
 
 [Unit]
 Description=Synapass control-plane dashboard

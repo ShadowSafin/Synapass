@@ -52,7 +52,7 @@ func addNativeFlags(fs *flag.FlagSet, opts *nativeOptions) {
 	fs.BoolVar(&opts.skipDashboard, "skip-dashboard", false, "gateway only: do not start or check the dashboard")
 	fs.BoolVar(&opts.consoleLogs, "console-logs", false, "stream child output to the terminal instead of log files")
 	fs.IntVar(&opts.dashboardPort, "dashboard-port", 0, "dashboard listen port (default 3000, PORT wins)")
-	fs.StringVar(&opts.dashboardHost, "dashboard-host", "", "dashboard bind address (default 127.0.0.1)")
+	fs.StringVar(&opts.dashboardHost, "dashboard-host", "", "dashboard bind address (default 0.0.0.0: localhost + LAN)")
 	fs.DurationVar(&opts.readinessTimeout, "readiness-timeout", 90*time.Second, "how long to wait for services to answer")
 }
 
@@ -372,7 +372,7 @@ func runNativeInstall(_ *config.Config, _ *slog.Logger, configPath, logLevel, lo
 native install complete.
 
   gateway:   http://127.0.0.1:%s  (health: /health, readiness: /ready)
-  dashboard: http://127.0.0.1:%d  (after 'synapass native up')
+  dashboard: http://127.0.0.1:%d  (after 'synapass native up'; LAN: http://<this-machine-ip>:%d)
   secrets:   %s
 
 next:
@@ -381,7 +381,7 @@ next:
 
 then open the dashboard: first visit shows the setup screen that creates the
 single console administrator and closes itself permanently.
-`, gwPort, dashboardPort(&opts), envPath)
+`, gwPort, dashboardPort(&opts), dashboardPort(&opts), envPath)
 	return nil
 }
 
@@ -527,7 +527,7 @@ func runNativeUp(_ *config.Config, _ *slog.Logger, configPath, logLevel, logForm
 	fmt.Println("gateway is ready")
 
 	if !opts.skipDashboard {
-		dashURL := "http://" + dashHost + ":" + strconv.Itoa(dashPort)
+		dashURL := "http://" + dashDisplayHost(dashHost) + ":" + strconv.Itoa(dashPort)
 		fmt.Printf("waiting for the dashboard at %s ...\n", dashURL)
 		if err := runtime.WaitForReady(ctx, dashURL+"/", opts.readinessTimeout); err != nil {
 			stop()
@@ -763,8 +763,12 @@ func dashboardPort(opts *nativeOptions) int {
 	return 3000
 }
 
-// dashboardHost resolves the dashboard bind address, defaulting to loopback so
-// a fresh install never listens on the LAN by accident.
+// dashboardHost resolves the dashboard bind address, defaulting to all
+// interfaces so the console is reachable from other devices on the LAN
+// (http://<lan-ip>:3000) as well as from localhost. The dashboard requires a
+// console login, so LAN exposure is an authenticated surface — unlike the
+// gateway's unauthenticated inference endpoint. Pass --dashboard-host
+// 127.0.0.1 (or HOSTNAME=127.0.0.1) for loopback-only.
 func dashboardHost(opts *nativeOptions) string {
 	if opts.dashboardHost != "" {
 		return opts.dashboardHost
@@ -772,7 +776,20 @@ func dashboardHost(opts *nativeOptions) string {
 	if host := os.Getenv("HOSTNAME"); host != "" {
 		return host
 	}
-	return "127.0.0.1"
+	return "0.0.0.0"
+}
+
+// dashDisplayHost maps a wildcard bind to a clickable address: 0.0.0.0 and ::
+// are not dialable, so reports use localhost while the LAN hint names the
+// network address separately.
+func dashDisplayHost(host string) string {
+	if host == "0.0.0.0" || host == "::" {
+		return "127.0.0.1"
+	}
+	if host == "" {
+		return "127.0.0.1"
+	}
+	return host
 }
 
 // dashURLOrNone renders the dashboard line of the readiness summary.
@@ -780,7 +797,7 @@ func dashURLOrNone(opts *nativeOptions, host string, port int) string {
 	if opts.skipDashboard {
 		return "(skipped)"
 	}
-	return "http://" + host + ":" + strconv.Itoa(port)
+	return "http://" + dashDisplayHost(host) + ":" + strconv.Itoa(port) + "  (LAN: http://<this-machine-ip>:" + strconv.Itoa(port) + ")"
 }
 
 // setupHint reminds the operator where the console credential comes from.

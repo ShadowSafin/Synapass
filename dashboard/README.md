@@ -45,7 +45,12 @@ SYNAPASS_ADMIN_KEY=<the gateway's admin key> \
 npm run dev
 ```
 
-Then open <http://localhost:3000>.
+Then open <http://localhost:3000>. `npm run dev` binds `0.0.0.0`, so other
+devices on the same network can use `http://<your-lan-ip>:3000` too (allow
+Node.js through the OS firewall on first prompt). The dev server
+auto-allowlists your current LAN IPs (`allowedDevOrigins` in
+`next.config.mjs`); add more names with
+`NEXT_ALLOWED_DEV_ORIGINS="my-pc.local,192.168.1.20"`.
 
 ## Build
 
