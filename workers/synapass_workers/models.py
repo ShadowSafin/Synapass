@@ -12,9 +12,10 @@ older worker reject a message.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Message kinds
@@ -39,7 +40,7 @@ STATUS_SKIPPED = "skipped"
 
 def utcnow() -> datetime:
     """Return the current UTC time."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def parse_timestamp(value: Any) -> datetime:
@@ -49,7 +50,7 @@ def parse_timestamp(value: Any) -> datetime:
     a numeric offset, so both forms are accepted rather than relying on one.
     """
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if not isinstance(value, str) or value == "":
         return utcnow()
     text = value.strip()
@@ -59,7 +60,7 @@ def parse_timestamp(value: Any) -> datetime:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return utcnow()
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -135,7 +136,7 @@ class TokenUsage:
         return self.prompt_tokens + self.completion_tokens
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any] | None) -> "TokenUsage":
+    def from_dict(cls, raw: Mapping[str, Any] | None) -> TokenUsage:
         if not raw:
             return cls()
         usage = cls(
@@ -186,7 +187,7 @@ class UsageEvent:
         return self.outcome in {"success", "fallback"}
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "UsageEvent":
+    def from_dict(cls, raw: Mapping[str, Any]) -> UsageEvent:
         return cls(
             id=_as_str(raw.get("id")),
             request_id=_as_str(raw.get("request_id")),
@@ -247,7 +248,7 @@ class EvalCandidate:
     judge_score: float | None = None
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "EvalCandidate":
+    def from_dict(cls, raw: Mapping[str, Any]) -> EvalCandidate:
         judge = raw.get("judge_score")
         return cls(
             id=_as_str(raw.get("id")) or _as_str(raw.get("model")),
@@ -281,14 +282,12 @@ class EvalJob:
     payload: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "EvalJob":
+    def from_dict(cls, raw: Mapping[str, Any]) -> EvalJob:
         raw_candidates = raw.get("candidates")
         candidates: tuple[EvalCandidate, ...] = ()
         if isinstance(raw_candidates, Sequence) and not isinstance(raw_candidates, (str, bytes)):
             candidates = tuple(
-                EvalCandidate.from_dict(item)
-                for item in raw_candidates
-                if isinstance(item, Mapping)
+                EvalCandidate.from_dict(item) for item in raw_candidates if isinstance(item, Mapping)
             )
 
         raw_metrics = raw.get("metrics")
@@ -346,7 +345,7 @@ class EvalResult:
             "candidate_count": self.candidate_count,
             "skipped": list(self.skipped),
             "notes": list(self.notes),
-            "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
+            "created_at": self.created_at.astimezone(UTC).isoformat(),
         }
 
 
@@ -411,7 +410,7 @@ class JobResult:
             "tenant_id": self.tenant_id,
             "status": self.status,
             "engine_version": "",
-            "created_at": utcnow().astimezone(timezone.utc).isoformat(),
+            "created_at": utcnow().astimezone(UTC).isoformat(),
         }
         payload.update(self.detail)
         if self.error:

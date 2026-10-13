@@ -9,7 +9,8 @@ reproducible byte-for-byte.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from .models import EvalCandidate, EvalJob
 
@@ -58,10 +59,7 @@ def build_replay_plan(
 ) -> dict[str, Any]:
     """Render the execution plan for a replay job."""
     raw_ids = job.payload.get("request_ids", [])
-    if isinstance(raw_ids, (list, tuple)):
-        requested = [str(x) for x in raw_ids if str(x)]
-    else:
-        requested = []
+    requested = [str(x) for x in raw_ids if str(x)] if isinstance(raw_ids, (list, tuple)) else []
     providers = job.payload.get("providers", [])
     models = job.payload.get("models", [])
     if isinstance(providers, str):

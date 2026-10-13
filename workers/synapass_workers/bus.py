@@ -15,9 +15,11 @@ silently drop a job.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +132,7 @@ class Bus:
         import asyncio
 
         async def _connect() -> None:
-            import nats  # noqa: PLC0415
+            import nats
 
             options: dict[str, Any] = {
                 "name": self.name,
@@ -144,9 +146,7 @@ class Bus:
                 options["user_credentials"] = self.credentials_file
 
             async def _do_connect() -> Any:
-                return await asyncio.wait_for(
-                    nats.connect(self.url, **options), timeout=15
-                )
+                return await asyncio.wait_for(nats.connect(self.url, **options), timeout=15)
 
             try:
                 self._conn = await _do_connect()
@@ -171,18 +171,18 @@ class Bus:
         if self._js is None:
             return
 
-        from .streams import STREAM_DEFINITIONS  # noqa: PLC0415
+        from .streams import STREAM_DEFINITIONS
 
         for definition in STREAM_DEFINITIONS:
             try:
                 await self._js.stream_info(definition["name"])
                 continue
-            except Exception:  # noqa: BLE001 - "not found" has no dedicated type
+            except Exception:
                 pass
             try:
                 await self._js.add_stream(**definition)
                 logger.info("created jetstream stream %s", definition["name"])
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # Reported, not fatal: on a shared NATS cluster the worker may lack
                 # permission to provision streams while still being allowed to
                 # consume existing ones.
@@ -197,14 +197,10 @@ class Bus:
     def close(self) -> None:
         """Drain subscriptions and close the connection."""
         if self._loop is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._call(self._close_async(), timeout=10)
-            except Exception:  # noqa: BLE001
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 self._loop.call_soon_threadsafe(self._loop.stop)
-            except Exception:  # noqa: BLE001
-                pass
             self._loop = None
             self._loop_thread = None
         self._subscriptions.clear()
@@ -213,19 +209,15 @@ class Bus:
 
     async def _close_async(self) -> None:
         for subscription in self._subscriptions:
-            try:
+            with contextlib.suppress(Exception):
                 await subscription.unsubscribe()
-            except Exception:  # noqa: BLE001
-                pass
         self._subscriptions.clear()
         if self._conn is not None:
             try:
                 await self._conn.drain()
-            except Exception:  # noqa: BLE001
-                try:
+            except Exception:
+                with contextlib.suppress(Exception):
                     await self._conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
             self._conn = None
             self._js = None
 
@@ -244,17 +236,15 @@ class Bus:
         async def _publish() -> None:
             data = json.dumps(payload, default=str).encode("utf-8")
             await self._conn.publish(subject, data)
-            try:
+            with contextlib.suppress(Exception):
                 await self._conn.flush(timeout=5)
-            except Exception:  # noqa: BLE001 - flush is best-effort
-                pass
 
         try:
             self._call(_publish(), timeout=10)
             self._published += 1
             # Flushing every publish bounds the window in which a crash loses the
             # result. The volume here is jobs, not requests, so the cost is nil.
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._failed += 1
             logger.error("failed to publish to %s: %s", subject, exc)
 
@@ -277,20 +267,18 @@ class Bus:
             async def _wrapped(msg: Any) -> None:
                 try:
                     handler(msg.data)
-                except Exception as exc:  # noqa: BLE001 - the handler is the boundary
+                except Exception as exc:
                     logger.warning(
                         "job failed on %s (durable %s), requesting redelivery: %s",
-                        subject, durable, exc,
+                        subject,
+                        durable,
+                        exc,
                     )
-                    try:
+                    with contextlib.suppress(Exception):
                         await msg.nak()
-                    except Exception:  # noqa: BLE001
-                        pass
                     return
-                try:
+                with contextlib.suppress(Exception):
                     await msg.ack()
-                except Exception:  # noqa: BLE001
-                    pass
 
             subscription = await self._js.subscribe(
                 subject,
@@ -314,7 +302,7 @@ class Bus:
             async def _wrapped(msg: Any) -> None:
                 try:
                     handler(msg.data)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Core NATS has no redelivery, so a failure is simply logged. This
                     # path is used for advisory traffic only.
                     logger.warning("handler failed on %s: %s", subject, exc)
@@ -335,7 +323,7 @@ class Bus:
             return False
         try:
             return bool(self._conn.is_connected)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
     def stats(self) -> dict[str, Any]:

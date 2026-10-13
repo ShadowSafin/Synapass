@@ -40,16 +40,16 @@ const (
 )
 
 const (
-	CacheInvalidateManual          = "manual_flush"
-	CacheInvalidateProviderChange  = "provider_changed"
-	CacheInvalidateModelChange     = "model_changed"
-	CacheInvalidatePolicyChange    = "policy_changed"
-	CacheInvalidateTenantSettings  = "tenant_settings_changed"
-	CacheInvalidateToolChange      = "tool_definition_changed"
-	CacheInvalidateExpired         = "expired"
-	CacheInvalidateUnsafe          = "unsafe_to_reuse"
-	CacheInvalidateConfigChange    = "config_changed"
-	CacheInvalidateEndpointChange  = "endpoint_changed"
+	CacheInvalidateManual         = "manual_flush"
+	CacheInvalidateProviderChange = "provider_changed"
+	CacheInvalidateModelChange    = "model_changed"
+	CacheInvalidatePolicyChange   = "policy_changed"
+	CacheInvalidateTenantSettings = "tenant_settings_changed"
+	CacheInvalidateToolChange     = "tool_definition_changed"
+	CacheInvalidateExpired        = "expired"
+	CacheInvalidateUnsafe         = "unsafe_to_reuse"
+	CacheInvalidateConfigChange   = "config_changed"
+	CacheInvalidateEndpointChange = "endpoint_changed"
 )
 
 // CachePolicy is the durable per-scope caching rule.
@@ -59,23 +59,23 @@ const (
 // matching disabled row bypasses with the scope's reason. When no row
 // matches, the global config defaults apply.
 type CachePolicy struct {
-	ID          string  `json:"id"`
-	TenantID    string  `json:"tenant_id,omitempty"`
-	EndpointID  string  `json:"endpoint_id,omitempty"`
-	APIKeyID    string  `json:"api_key_id,omitempty"`
-	Provider    string  `json:"provider,omitempty"`
-	Model       string  `json:"model,omitempty"`
-	Name        string  `json:"name"`
-	Enabled     bool    `json:"enabled"`
-	TTLSeconds  int     `json:"ttl_seconds"`
+	ID         string `json:"id"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	EndpointID string `json:"endpoint_id,omitempty"`
+	APIKeyID   string `json:"api_key_id,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Name       string `json:"name"`
+	Enabled    bool   `json:"enabled"`
+	TTLSeconds int    `json:"ttl_seconds"`
 	// Semantic and Prefix are optional overrides: nil means "inherit the
 	// global tier switch", so a TTL-only rule never disables a tier by
 	// accident.
-	Semantic    *bool   `json:"semantic_enabled,omitempty"`
-	Threshold   float64 `json:"semantic_threshold,omitempty"`
-	Prefix      *bool   `json:"prefix_enabled,omitempty"`
-	BypassTools *bool   `json:"bypass_tool_requests,omitempty"`
-	AllowNonDet *bool   `json:"allow_nondeterministic,omitempty"`
+	Semantic    *bool     `json:"semantic_enabled,omitempty"`
+	Threshold   float64   `json:"semantic_threshold,omitempty"`
+	Prefix      *bool     `json:"prefix_enabled,omitempty"`
+	BypassTools *bool     `json:"bypass_tool_requests,omitempty"`
+	AllowNonDet *bool     `json:"allow_nondeterministic,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -98,15 +98,15 @@ func (p *CachePolicy) PrefixAllowed(global bool) bool {
 
 // CacheDecision is the policy engine output for one request.
 type CacheDecision struct {
-	Cacheable    bool   `json:"cacheable"`
-	BypassReason string `json:"bypass_reason,omitempty"`
-	TTL          time.Duration `json:"-"`
-	TTLSeconds   int    `json:"ttl_seconds,omitempty"`
-	AllowExact   bool   `json:"allow_exact"`
-	AllowPrefix  bool   `json:"allow_prefix"`
-	AllowSemantic bool  `json:"allow_semantic"`
-	PolicyID     string `json:"policy_id,omitempty"`
-	Scope        string `json:"scope,omitempty"`
+	Cacheable     bool          `json:"cacheable"`
+	BypassReason  string        `json:"bypass_reason,omitempty"`
+	TTL           time.Duration `json:"-"`
+	TTLSeconds    int           `json:"ttl_seconds,omitempty"`
+	AllowExact    bool          `json:"allow_exact"`
+	AllowPrefix   bool          `json:"allow_prefix"`
+	AllowSemantic bool          `json:"allow_semantic"`
+	PolicyID      string        `json:"policy_id,omitempty"`
+	Scope         string        `json:"scope,omitempty"`
 }
 
 // IsCacheable reports whether the request may use the cache at all.
@@ -117,56 +117,56 @@ func (d CacheDecision) IsCacheable() bool { return d.Cacheable }
 // the store: same model, same provider availability, same policy version,
 // same tool definitions hash.
 type CacheHitMeta struct {
-	Model       string    `json:"model"`
-	Provider    string    `json:"provider,omitempty"`
-	PolicyID    string    `json:"policy_id,omitempty"`
-	PolicyVersion int     `json:"policy_version,omitempty"`
-	EndpointID  string    `json:"endpoint_id,omitempty"`
-	ToolsHash   string    `json:"tools_hash,omitempty"`
+	Model         string `json:"model"`
+	Provider      string `json:"provider,omitempty"`
+	PolicyID      string `json:"policy_id,omitempty"`
+	PolicyVersion int    `json:"policy_version,omitempty"`
+	EndpointID    string `json:"endpoint_id,omitempty"`
+	ToolsHash     string `json:"tools_hash,omitempty"`
 	// SettingsHash covers generation settings and the response contract
 	// (temperature, top-p, seed, max tokens, response format, stop, ...).
 	// A settings change turns a would-be hit into a miss.
-	SettingsHash string   `json:"settings_hash,omitempty"`
+	SettingsHash string `json:"settings_hash,omitempty"`
 	// Sensitivity is the request sensitivity label the entry was stored
 	// under. Labels isolate entries exactly like tenants do.
-	Sensitivity string    `json:"sensitivity,omitempty"`
+	Sensitivity string `json:"sensitivity,omitempty"`
 	// User is the end-user identifier the entry was stored under.
-	User        string    `json:"user,omitempty"`
+	User string `json:"user,omitempty"`
 	// APIKeyID is the calling key the entry was stored under. Exact keys
 	// already hash it; this field lets the prefix/semantic validators
 	// enforce the same isolation for non-exact tiers.
-	APIKeyID    string    `json:"api_key_id,omitempty"`
-	PromptHash  string    `json:"prompt_hash"`
-	Usage       TokenUsage `json:"usage,omitempty"`
-	CostUSD     float64   `json:"cost_usd,omitempty"`
-	ProviderLatencyMS int64 `json:"provider_latency_ms,omitempty"`
-	StoredAt    time.Time `json:"stored_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	ReuseCount  int64     `json:"reuse_count,omitempty"`
+	APIKeyID          string     `json:"api_key_id,omitempty"`
+	PromptHash        string     `json:"prompt_hash"`
+	Usage             TokenUsage `json:"usage,omitempty"`
+	CostUSD           float64    `json:"cost_usd,omitempty"`
+	ProviderLatencyMS int64      `json:"provider_latency_ms,omitempty"`
+	StoredAt          time.Time  `json:"stored_at"`
+	ExpiresAt         time.Time  `json:"expires_at"`
+	ReuseCount        int64      `json:"reuse_count,omitempty"`
 }
 
 // CachedPayload is the Redis envelope: the exact response bytes plus the
 // metadata needed to validate and explain a future hit.
 type CachedPayload struct {
-	Body []byte      `json:"body"`
+	Body []byte       `json:"body"`
 	Meta CacheHitMeta `json:"meta"`
 }
 
 // CacheInspectEntry is one cache entry for the admin inspect view.
 // The body is never returned in lists; only metadata and a preview hash.
 type CacheInspectEntry struct {
-	CacheKey    string    `json:"cache_key"`
-	Kind        CacheKind `json:"kind"`
-	TenantID    string    `json:"tenant_id"`
-	Model       string    `json:"model,omitempty"`
-	Provider    string    `json:"provider,omitempty"`
-	PromptHash  string    `json:"prompt_hash"`
-	PromptPreview string  `json:"prompt_preview,omitempty"`
-	HitCount    int       `json:"hit_count"`
-	ReuseCount  int64     `json:"reuse_count,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	CacheKey      string    `json:"cache_key"`
+	Kind          CacheKind `json:"kind"`
+	TenantID      string    `json:"tenant_id"`
+	Model         string    `json:"model,omitempty"`
+	Provider      string    `json:"provider,omitempty"`
+	PromptHash    string    `json:"prompt_hash"`
+	PromptPreview string    `json:"prompt_preview,omitempty"`
+	HitCount      int       `json:"hit_count"`
+	ReuseCount    int64     `json:"reuse_count,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 // CacheInvalidationEvent is the durable audit row for a flush.

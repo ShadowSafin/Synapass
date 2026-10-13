@@ -104,9 +104,9 @@ type Config struct {
 	// models what they can do so routing does not have to guess from the
 	// provider kind.
 	Detection DetectionConfig `yaml:"detection" json:"detection"`
-	Telemetry  TelemetryConfig  `yaml:"telemetry" json:"telemetry"`
-	Logging    LoggingConfig    `yaml:"logging" json:"logging"`
-	Admin      AdminConfig      `yaml:"admin" json:"admin"`
+	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
+	Logging   LoggingConfig   `yaml:"logging" json:"logging"`
+	Admin     AdminConfig     `yaml:"admin" json:"admin"`
 
 	// Providers, Models and Policies are the declarative bootstrap catalogue.
 	// They are applied to Postgres on startup when bootstrap is enabled, after
@@ -826,42 +826,42 @@ func Default() *Config {
 				MaxBackoff:     Duration(2 * time.Second),
 				Multiplier:     2.0,
 			},
-DefaultTimeout: TimeoutConfig{
-			// Generous enough that a long answer completes; tight enough that a
-			// stuck upstream is abandoned. Per-request policy timeouts override.
-			Total:      Duration(10 * time.Minute),
-			PerAttempt: Duration(5 * time.Minute),
-			Connect:    Duration(10 * time.Second),
-			StreamIdle: Duration(90 * time.Second),
-			FirstToken: Duration(60 * time.Second),
-		},
-		DefaultLimits: LimitsConfig{
-			// 32768 is a ceiling, not a target: it stops a runaway generation
-			// without cutting off an ordinary long answer. The client may ask
-			// for less; a client asking for more is clamped to this.
-			MaxOutputTokens:   32768,
-			LatencyTargetMS:   10000,
-			RequestsPerMinute: 600,
-		},
+			DefaultTimeout: TimeoutConfig{
+				// Generous enough that a long answer completes; tight enough that a
+				// stuck upstream is abandoned. Per-request policy timeouts override.
+				Total:      Duration(10 * time.Minute),
+				PerAttempt: Duration(5 * time.Minute),
+				Connect:    Duration(10 * time.Second),
+				StreamIdle: Duration(90 * time.Second),
+				FirstToken: Duration(60 * time.Second),
+			},
+			DefaultLimits: LimitsConfig{
+				// 32768 is a ceiling, not a target: it stops a runaway generation
+				// without cutting off an ordinary long answer. The client may ask
+				// for less; a client asking for more is clamped to this.
+				MaxOutputTokens:   32768,
+				LatencyTargetMS:   10000,
+				RequestsPerMinute: 600,
+			},
 			HealthCheckEnabled:  true,
 			HealthCheckInterval: Duration(30 * time.Second),
 			HealthCheckTimeout:  Duration(10 * time.Second),
 			HealthWindow:        Duration(5 * time.Minute),
 		},
 		Cache: CacheConfig{
-			ResponseCache:     false,
-			ResponseTTL:       Duration(5 * time.Minute),
-			MaxResponseBytes:  256 << 10,
-			ProviderHealthTTL: Duration(90 * time.Second),
-			PolicyCacheTTL:    Duration(30 * time.Second),
-			RegistryCacheTTL:  Duration(30 * time.Second),
-			SemanticEnabled:   true,
-			PrefixEnabled:     true,
-			SemanticThreshold: 0.92,
-			PrefixLength:      256,
-			ExactEnabled:      true,
+			ResponseCache:         false,
+			ResponseTTL:           Duration(5 * time.Minute),
+			MaxResponseBytes:      256 << 10,
+			ProviderHealthTTL:     Duration(90 * time.Second),
+			PolicyCacheTTL:        Duration(30 * time.Second),
+			RegistryCacheTTL:      Duration(30 * time.Second),
+			SemanticEnabled:       true,
+			PrefixEnabled:         true,
+			SemanticThreshold:     0.92,
+			PrefixLength:          256,
+			ExactEnabled:          true,
 			AllowNondeterministic: false,
-			MaxSemanticEntries: 2000,
+			MaxSemanticEntries:    2000,
 		},
 		Tools: ToolsConfig{
 			// Off by default: agentic clients run their own tools. Set

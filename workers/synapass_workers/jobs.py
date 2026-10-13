@@ -9,7 +9,8 @@ these are the parts most likely to be wrong.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from . import ENGINE_VERSION
 from .models import (
@@ -25,10 +26,10 @@ from .models import (
     JobResult,
 )
 from .prompt_analysis import analyze_request
-from .scoring import composite_score, rank_candidates, resolve_metrics, score_candidate
+from .scoring import rank_candidates, resolve_metrics, score_candidate
 
 
-class UnknownJobKind(ValueError):
+class UnknownJobKindError(ValueError):
     """Raised when a job carries a ``kind`` this worker does not implement.
 
     Rejecting loudly is deliberate: silently acknowledging an unknown job would
@@ -60,8 +61,7 @@ def evaluate_job(
 
     if job.max_candidates > 0 and len(job.candidates) > job.max_candidates:
         notes.append(
-            f"job listed {len(job.candidates)} candidates; "
-            f"only the first {job.max_candidates} were scored"
+            f"job listed {len(job.candidates)} candidates; only the first {job.max_candidates} were scored"
         )
         candidates = job.candidates[: job.max_candidates]
     else:
@@ -77,9 +77,7 @@ def evaluate_job(
             # scores zero rather than being dropped, because dropping it would
             # flatter the provider that produced it.
             notes.append(f"candidate {candidate.id or candidate.model} returned no output")
-        scores[candidate.id or candidate.model] = score_candidate(
-            job.reference, candidate.output, metrics
-        )
+        scores[candidate.id or candidate.model] = score_candidate(job.reference, candidate.output, metrics)
 
     if not scores:
         return EvalResult(
@@ -88,7 +86,7 @@ def evaluate_job(
             status=STATUS_SKIPPED,
             engine_version=ENGINE_VERSION,
             skipped=tuple(skipped),
-            notes=tuple(notes + ["no candidate produced a scoreable answer"]),
+            notes=(*notes, "no candidate produced a scoreable answer"),
             candidate_count=len(candidates),
         )
 
@@ -236,7 +234,7 @@ def dispatch(
             status=STATUS_FAILED,
             error=f"unsupported job kind {job.kind!r}",
         )
-    except Exception as exc:  # noqa: BLE001 - the envelope is the error boundary
+    except Exception as exc:
         # Every failure is converted into a published result. A job that fails
         # silently would be retried until its delivery limit and then discarded,
         # leaving an operator with no record of why their evaluation never ran.
@@ -253,7 +251,7 @@ def parse_job(payload: Mapping[str, Any]) -> EvalJob:
     """Parse a raw job payload."""
     job = EvalJob.from_dict(payload)
     if job.kind and job.kind not in KNOWN_JOB_KINDS:
-        raise UnknownJobKind(f"unsupported job kind {job.kind!r}")
+        raise UnknownJobKindError(f"unsupported job kind {job.kind!r}")
     return job
 
 

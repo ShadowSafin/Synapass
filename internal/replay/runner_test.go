@@ -78,9 +78,9 @@ type fakeAdapter struct {
 	calls   int
 }
 
-func (f *fakeAdapter) Name() string                              { return f.name }
-func (f *fakeAdapter) Kind() domain.ProviderKind                 { return domain.ProviderOpenAICompatible }
-func (f *fakeAdapter) Capabilities() domain.CapabilitySet        { return domain.CapabilitySet{} }
+func (f *fakeAdapter) Name() string                       { return f.name }
+func (f *fakeAdapter) Kind() domain.ProviderKind          { return domain.ProviderOpenAICompatible }
+func (f *fakeAdapter) Capabilities() domain.CapabilitySet { return domain.CapabilitySet{} }
 func (f *fakeAdapter) HealthCheck(context.Context) domain.ProviderHealth {
 	return domain.ProviderHealth{State: domain.HealthHealthy}
 }
@@ -134,8 +134,8 @@ func TestRunnerReplaysAgainstOriginalTarget(t *testing.T) {
 	adapter := &fakeAdapter{name: "bynara", enabled: true, output: "hello",
 		usage: domain.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}
 	r := NewRunner(RunnerDeps{
-		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
-		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "bynara", RequestedModel: "flash", RoutedModel: "flash"}}},
+		Payloads: &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:     &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "bynara", RequestedModel: "flash", RoutedModel: "flash"}}},
 		Store:    store,
 		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"bynara": adapter}},
 		Pricer:   stubPricer,
@@ -334,8 +334,8 @@ func TestRunnerScoresSuccessfulResults(t *testing.T) {
 	adapter := &fakeAdapter{name: "bynara", enabled: true, output: "hello",
 		usage: domain.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}
 	r := NewRunner(RunnerDeps{
-		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
-		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "bynara", RequestedModel: "flash", RoutedModel: "flash"}}},
+		Payloads: &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:     &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "bynara", RequestedModel: "flash", RoutedModel: "flash"}}},
 		Store:    store,
 		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"bynara": adapter}},
 		Pricer:   stubPricer,
@@ -379,8 +379,8 @@ func TestRunnerScoringWithoutReferenceStillFillsMetrics(t *testing.T) {
 	adapter := &fakeAdapter{name: "a", enabled: true, output: "hello",
 		usage: domain.TokenUsage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}
 	r := NewRunner(RunnerDeps{
-		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
-		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Payloads: &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:     &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
 		Store:    store,
 		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
 	})
@@ -419,8 +419,8 @@ func TestRunnerScorerErrorDegradesGracefully(t *testing.T) {
 	adapter := &fakeAdapter{name: "a", enabled: true, output: "ok",
 		usage: domain.TokenUsage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}
 	r := NewRunner(RunnerDeps{
-		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
-		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Payloads: &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:     &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
 		Store:    store,
 		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
 		Scorer:   errScorer{err: errors.New("scorer down")},
@@ -458,8 +458,8 @@ func TestRunnerPublishesCompletionEvent(t *testing.T) {
 	adapter := &fakeAdapter{name: "a", enabled: true, output: "ok"}
 	pub := &fakePublisher{}
 	r := NewRunner(RunnerDeps{
-		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
-		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Payloads: &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:     &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
 		Store:    store,
 		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
 		Events:   pub,

@@ -465,10 +465,10 @@ func collectCacheEntries(rows interface {
 	var out []domain.CacheEntry
 	for rows.Next() {
 		var (
-			e                                   domain.CacheEntry
-			kind                                string
-			expiresAt                           *time.Time
-			createdAt, updatedAt                time.Time
+			e                    domain.CacheEntry
+			kind                 string
+			expiresAt            *time.Time
+			createdAt, updatedAt time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.TenantID, &kind, &e.CacheKey, &e.Model,
 			&e.PromptHash, &e.EmbeddingHash, &e.Similarity, &e.Sensitive,

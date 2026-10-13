@@ -49,7 +49,7 @@ func baseInput() KeyInput {
 	temp := 0.0
 	return KeyInput{
 		TenantID: "t1", APIKeyID: "k1", Model: "m1",
-		Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: domain.NewTextContent("hello world")}},
+		Messages:    []domain.ChatMessage{{Role: domain.RoleUser, Content: domain.NewTextContent("hello world")}},
 		Temperature: &temp,
 	}
 }

@@ -36,9 +36,9 @@ const (
 // or the application, and nothing more; returning the operator list or any
 // account detail here would leak it to an unauthenticated caller.
 type authStateResponse struct {
-	SetupRequired bool `json:"setup_required"`
-	Authenticated bool `json:"authenticated"`
-	Username      string `json:"username,omitempty"`
+	SetupRequired bool                      `json:"setup_required"`
+	Authenticated bool                      `json:"authenticated"`
+	Username      string                    `json:"username,omitempty"`
 	Policy        dashboardauth.Description `json:"policy"`
 }
 
@@ -331,7 +331,7 @@ func (s *Server) clientInfo(r *http.Request) dashboardauth.ClientInfo {
 func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, err error, action string) {
 	normalized := domain.AsError(err)
 
-if normalized.Code == domain.ErrCodeRateLimited {
+	if normalized.Code == domain.ErrCodeRateLimited {
 		if seconds := int(s.config.Admin.DashboardAuth.LockoutDuration.Std()); seconds > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		}

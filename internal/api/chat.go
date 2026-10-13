@@ -669,31 +669,31 @@ func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestCo
 	if reasoning != "" {
 		thinking := domain.ChatMessage{Role: domain.RoleAssistant, Reasoning: reasoning}
 		frames = append(frames, domain.ChatCompletionChunk{
-			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
-			Object: domain.ObjectChatCompletionChunk,
-			Created: created,
-			Model: model,
+			ID:                firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object:            domain.ObjectChatCompletionChunk,
+			Created:           created,
+			Model:             model,
 			SystemFingerprint: cached.SystemFingerprint,
-			Choices: []domain.Choice{{Index: 0, Delta: &thinking}},
-			Synapass: meta,
+			Choices:           []domain.Choice{{Index: 0, Delta: &thinking}},
+			Synapass:          meta,
 		})
 		meta = nil
 	}
 	frames = append(frames,
 		domain.ChatCompletionChunk{
-			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
-			Object: domain.ObjectChatCompletionChunk,
-			Created: created,
-			Model: model,
+			ID:                firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object:            domain.ObjectChatCompletionChunk,
+			Created:           created,
+			Model:             model,
 			SystemFingerprint: cached.SystemFingerprint,
-			Choices: []domain.Choice{{Index: 0, Delta: &delta}},
-			Synapass: meta,
+			Choices:           []domain.Choice{{Index: 0, Delta: &delta}},
+			Synapass:          meta,
 		},
 		domain.ChatCompletionChunk{
-			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
-			Object: domain.ObjectChatCompletionChunk,
+			ID:      firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object:  domain.ObjectChatCompletionChunk,
 			Created: created,
-			Model: model,
+			Model:   model,
 			Choices: []domain.Choice{{Index: 0, FinishReason: &stop}},
 		},
 	)
@@ -707,12 +707,12 @@ func (s *Server) serveCacheHitStream(w http.ResponseWriter, rc *domain.RequestCo
 	if body != nil && body.StreamOptions != nil && body.StreamOptions.IncludeUsage && cached.Usage != nil {
 		usageCopy := *cached.Usage
 		if werr := sse.WriteEvent(domain.ChatCompletionChunk{
-			ID: firstNonEmptyString(cached.ID, rc.RequestID.String()),
-			Object: domain.ObjectChatCompletionChunk,
+			ID:      firstNonEmptyString(cached.ID, rc.RequestID.String()),
+			Object:  domain.ObjectChatCompletionChunk,
 			Created: created,
-			Model: model,
+			Model:   model,
 			Choices: []domain.Choice{},
-			Usage: &usageCopy,
+			Usage:   &usageCopy,
 		}); werr != nil {
 			_ = werr
 		}
@@ -746,36 +746,36 @@ func (s *Server) recordCacheOutcome(ctx context.Context, rc *domain.RequestConte
 		estimate = rc.Resolution.EstimatedCost
 	}
 	out := telemetry.RequestOutcome{
-		RequestID:      rc.RequestID,
-		TraceID:        rc.TraceID,
-		TenantID:       rc.TenantID(),
-		APIKeyID:       rc.APIKeyID(),
-		Provider:       "cache",
-		Model:          rc.RequestedModel,
-		RequestedModel: rc.RequestedModel,
-		PolicyID:       policyID,
-		RequestType:    rc.RequestType,
-		Usage:          usage,
-		Cost:           domain.Cost{},
-		EstimateCost:   estimate,
-		EndpointID:     rc.EndpointID,
-		LatencyMS:      elapsed.Milliseconds(),
-		CacheHit:       true,
-		CacheKind:      string(lookup.Kind),
-		CacheLookupMS:  lookup.LookupMS,
-		CacheSimilarity: lookup.Similarity,
-		CacheReuseCount: lookup.ReuseCount,
+		RequestID:           rc.RequestID,
+		TraceID:             rc.TraceID,
+		TenantID:            rc.TenantID(),
+		APIKeyID:            rc.APIKeyID(),
+		Provider:            "cache",
+		Model:               rc.RequestedModel,
+		RequestedModel:      rc.RequestedModel,
+		PolicyID:            policyID,
+		RequestType:         rc.RequestType,
+		Usage:               usage,
+		Cost:                domain.Cost{},
+		EstimateCost:        estimate,
+		EndpointID:          rc.EndpointID,
+		LatencyMS:           elapsed.Milliseconds(),
+		CacheHit:            true,
+		CacheKind:           string(lookup.Kind),
+		CacheLookupMS:       lookup.LookupMS,
+		CacheSimilarity:     lookup.Similarity,
+		CacheReuseCount:     lookup.ReuseCount,
 		CacheLatencySavedMS: lookup.LatencySavedMS,
-		Streaming:      rc.Stream,
-		Status:         http.StatusOK,
-		Outcome:        domain.OutcomeSuccess,
-		ClientIP:       rc.ClientIP,
-		UserAgent:      rc.UserAgent,
-		Task:            rc.Task,
-		Shaping:         rc.ShapePlan,
-		PolicyDecision:  rc.PolicyDecision,
-		Messages:        rc.Messages,
-		MaxOutputTokens: rc.MaxOutputTokens,
+		Streaming:           rc.Stream,
+		Status:              http.StatusOK,
+		Outcome:             domain.OutcomeSuccess,
+		ClientIP:            rc.ClientIP,
+		UserAgent:           rc.UserAgent,
+		Task:                rc.Task,
+		Shaping:             rc.ShapePlan,
+		PolicyDecision:      rc.PolicyDecision,
+		Messages:            rc.Messages,
+		MaxOutputTokens:     rc.MaxOutputTokens,
 	}
 	s.recorder.RecordRequest(ctx, out)
 }
@@ -802,9 +802,9 @@ func completionMeta(
 	applied := effectiveAppliedTokens(decision, rc)
 
 	meta := &domain.CompletionMeta{
-		RequestedTokens: requestedOutputTokens(rc),
-		AppliedTokens:   applied,
-		PromptTokens:    usage.PromptTokens,
+		RequestedTokens:  requestedOutputTokens(rc),
+		AppliedTokens:    applied,
+		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 	}
 	if decision != nil {
@@ -926,9 +926,9 @@ func requestIDOf(rc *domain.RequestContext) string {
 // make the incompleteness explicit to the client, the metric and the log.
 func (s *Server) truncationOnStream(rc *domain.RequestContext, decision *domain.RouteDecision, err *domain.Error) *domain.CompletionMeta {
 	meta := &domain.CompletionMeta{
-		Truncated: true,
-		Reason:    "timeout",
-		TimedOut:  true,
+		Truncated:    true,
+		Reason:       "timeout",
+		TimedOut:     true,
 		PromptTokens: rc.PromptTokens,
 	}
 	if rc != nil {
@@ -1287,12 +1287,12 @@ func (s *Server) usageChunk(resp *providers.Response, rc *domain.RequestContext,
 	}, debug)
 	usageCopy := usage
 	return domain.ChatCompletionChunk{
-		ID:         firstNonEmptyString(resp.ID, rc.RequestID.String()),
-		Object:     domain.ObjectChatCompletionChunk,
-		Created:    resp.Created,
-		Model:      resp.Model,
-		Choices:    []domain.Choice{},
-		Usage:      &usageCopy,
+		ID:       firstNonEmptyString(resp.ID, rc.RequestID.String()),
+		Object:   domain.ObjectChatCompletionChunk,
+		Created:  resp.Created,
+		Model:    resp.Model,
+		Choices:  []domain.Choice{},
+		Usage:    &usageCopy,
 		Synapass: meta,
 	}
 }
@@ -1337,7 +1337,7 @@ func (s *Server) buildResponse(
 		Choices:           resp.Choices,
 		Usage:             &usageCopy,
 		SystemFingerprint: resp.SystemFingerprint,
-		Synapass:        meta,
+		Synapass:          meta,
 	}
 }
 
@@ -1864,12 +1864,12 @@ func (s *Server) runToolCompletion(
 	}
 	usageCopy := usage
 	writeJSON(w, http.StatusOK, domain.ChatCompletionResponse{
-		ID:         firstNonEmptyString(response.ID, rc.RequestID.String()),
-		Object:     domain.ObjectChatCompletion,
-		Created:    created,
-		Model:      firstNonEmptyString(response.Model, decision.Chosen.Model),
-		Choices:    []domain.Choice{toolFinalChoiceBounded(response, content, boundedWithoutAnswer)},
-		Usage:      &usageCopy,
+		ID:       firstNonEmptyString(response.ID, rc.RequestID.String()),
+		Object:   domain.ObjectChatCompletion,
+		Created:  created,
+		Model:    firstNonEmptyString(response.Model, decision.Chosen.Model),
+		Choices:  []domain.Choice{toolFinalChoiceBounded(response, content, boundedWithoutAnswer)},
+		Usage:    &usageCopy,
 		Synapass: meta,
 	})
 

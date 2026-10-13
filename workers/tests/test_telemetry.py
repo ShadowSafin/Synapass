@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from synapass_workers.models import TokenUsage, UsageEvent
 from synapass_workers.telemetry import Aggregator, Rollup, rollup_payload
@@ -13,7 +13,7 @@ class FakeClock:
     """A manually advanced clock so the window can be tested without sleeping."""
 
     def __init__(self) -> None:
-        self.now = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        self.now = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
 
     def __call__(self) -> datetime:
         return self.now
@@ -119,7 +119,9 @@ class TestIngestion(unittest.TestCase):
 
     def test_derives_the_total_when_the_provider_omits_it(self) -> None:
         aggregator = Aggregator()
-        event = UsageEvent(provider="openai", model="m", usage=TokenUsage(prompt_tokens=7, completion_tokens=3))
+        event = UsageEvent(
+            provider="openai", model="m", usage=TokenUsage(prompt_tokens=7, completion_tokens=3)
+        )
         aggregator.observe(event)
         self.assertEqual(aggregator.snapshot()[0]["total_tokens"], 10)
 
@@ -184,7 +186,7 @@ class TestLatency(unittest.TestCase):
         for latency in range(1, 101):
             aggregator.observe(usage_event(latency_ms=latency))
 
-        rollup = aggregator._rollups[("openai", "gpt-4o")]  # noqa: SLF001 - asserting the bound
+        rollup = aggregator._rollups[("openai", "gpt-4o")]
         self.assertEqual(len(rollup.latencies), 4)
         self.assertEqual(list(rollup.latencies), [97, 98, 99, 100])
 

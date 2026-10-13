@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from . import ENGINE_VERSION
 
@@ -69,9 +70,7 @@ _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 _PHONE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)")
 # Credential-shaped strings: a long unbroken run that mixes cases and digits, or a
 # known prefix. This catches the common paste-a-key mistake, not every secret.
-_API_KEY = re.compile(
-    r"\b(?:sk|pk|ghp|gho|github_pat|xox[baprs]|AKIA|AIza)[_-]?[A-Za-z0-9_-]{16,}\b"
-)
+_API_KEY = re.compile(r"\b(?:sk|pk|ghp|gho|github_pat|xox[baprs]|AKIA|AIza)[_-]?[A-Za-z0-9_-]{16,}\b")
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{20,}\b", re.IGNORECASE)
 _SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _CARD_CANDIDATE = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
@@ -190,9 +189,10 @@ def estimate_request_tokens(request: Mapping[str, Any]) -> int:
             if isinstance(tool, Mapping):
                 function = tool.get("function")
                 if isinstance(function, Mapping):
-                    total += estimate_tokens(
-                        f"{function.get('name', '')}{function.get('description', '')}"
-                    ) + TOOL_FRAMING_TOKENS
+                    total += (
+                        estimate_tokens(f"{function.get('name', '')}{function.get('description', '')}")
+                        + TOOL_FRAMING_TOKENS
+                    )
 
     return total
 
@@ -469,8 +469,12 @@ def analyze_text(
         sensitive=sensitive,
     )
     complexity = classify_complexity(
-        tokens, has_tools=False, has_code=has_code, has_image=False,
-        message_count=1, reasoning=False,
+        tokens,
+        has_tools=False,
+        has_code=has_code,
+        has_image=False,
+        message_count=1,
+        reasoning=False,
     )
     return {
         "request_id": request_id,

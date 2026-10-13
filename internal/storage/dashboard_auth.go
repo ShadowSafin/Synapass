@@ -323,10 +323,10 @@ type rowScanner interface {
 
 func scanDashboardUser(row rowScanner) (*domain.DashboardUser, error) {
 	var (
-		u           domain.DashboardUser
-		lockedTill  *time.Time
-		lastLogin   *time.Time
-		passwordAt  time.Time
+		u          domain.DashboardUser
+		lockedTill *time.Time
+		lastLogin  *time.Time
+		passwordAt time.Time
 	)
 	err := row.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.Enabled, &u.FailedAttempts,
@@ -342,8 +342,8 @@ func scanDashboardUser(row rowScanner) (*domain.DashboardUser, error) {
 
 func scanDashboardSession(row rowScanner) (*domain.DashboardSession, error) {
 	var (
-		s        domain.DashboardSession
-		revoked  *time.Time
+		s       domain.DashboardSession
+		revoked *time.Time
 	)
 	err := row.Scan(
 		&s.ID, &s.UserID, &s.TokenHash, &s.CreatedAt,

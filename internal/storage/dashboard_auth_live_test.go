@@ -45,7 +45,7 @@ func TestLiveDashboardUserRepository(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM dashboard_users WHERE username = $1`, name)
 	}()
 
-// A syntactically valid Argon2id string; the repository never parses it.
+	// A syntactically valid Argon2id string; the repository never parses it.
 	const hash = "$argon2id$v=19$m=19456,t=2,p=2$c2Fyc3RvdC1zYWx0MDA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGE"
 
 	user, err := repo.Create(ctx, &domain.DashboardUser{
@@ -55,7 +55,7 @@ func TestLiveDashboardUserRepository(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-// Below the threshold there is no lock to set, so the statement has to cope
+	// Below the threshold there is no lock to set, so the statement has to cope
 	// with a NULL lock instant while still stamping updated_at. This is the path
 	// where sharing one parameter for both silently violated the NOT NULL
 	// constraint on updated_at.
@@ -82,7 +82,7 @@ func TestLiveDashboardUserRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ByUsername: %v", err)
 	}
-// One sub-threshold failure above, then three that cross it.
+	// One sub-threshold failure above, then three that cross it.
 	if got.FailedAttempts != 4 {
 		t.Errorf("failed_attempts = %d, want 4", got.FailedAttempts)
 	}

@@ -15,8 +15,9 @@ import json
 import logging
 import re
 import sys
-from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 # Keys whose values are replaced before a record is written. Matching is
 # case-insensitive and substring-based, so ``api_key``, ``provider_api_key`` and
@@ -42,9 +43,31 @@ _REDACTED = "<redacted>"
 # The standard LogRecord attributes. Anything outside this set is a field the
 # caller attached with ``extra=``, which is what gets promoted into the JSON body.
 _RESERVED: frozenset[str] = frozenset(
-    """args asctime created exc_info exc_text filename funcName levelname levelno
-    lineno module msecs message msg name pathname process processName relativeCreated
-    stack_info taskName thread threadName""".split()
+    [
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "taskName",
+        "thread",
+        "threadName",
+    ]
 )
 
 _SAFE_KEY = re.compile(r"[^A-Za-z0-9_]")
@@ -60,7 +83,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "time": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "time": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname.lower(),
             "msg": record.getMessage(),
             "service": self.service,
@@ -163,7 +186,4 @@ def redact_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
 def redact_keys(mapping: Mapping[str, Any], keys: Iterable[str]) -> dict[str, Any]:
     """Redact a specific set of keys, leaving everything else untouched."""
     drop = {key.lower() for key in keys}
-    return {
-        key: (_REDACTED if key.lower() in drop else value)
-        for key, value in mapping.items()
-    }
+    return {key: (_REDACTED if key.lower() in drop else value) for key, value in mapping.items()}

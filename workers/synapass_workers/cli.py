@@ -17,8 +17,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from . import ENGINE_VERSION, __version__
 from .config import Config, ConfigError
@@ -192,8 +193,7 @@ def _score(args: argparse.Namespace) -> int:
             reference=reference,
             metrics=metric_names,
             candidates=tuple(
-                EvalCandidate(id=candidate_id, output=output)
-                for candidate_id, output in candidates.items()
+                EvalCandidate(id=candidate_id, output=output) for candidate_id, output in candidates.items()
             ),
         )
         result = dispatch(job)

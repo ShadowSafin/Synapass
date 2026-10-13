@@ -341,9 +341,9 @@ type CacheStats struct {
 	// CostSavedUSD accumulates the stored serving cost of reused answers:
 	// each hit adds the original request's billed cost, which is the
 	// standing delta the cache avoided re-spending.
-	CostSavedUSD   float64          `json:"cost_saved_usd,omitempty"`
-	LookupMSAvg    float64          `json:"lookup_ms_avg,omitempty"`
-	TopPrompts     []CacheTopPrompt `json:"top_prompts,omitempty"`
+	CostSavedUSD float64          `json:"cost_saved_usd,omitempty"`
+	LookupMSAvg  float64          `json:"lookup_ms_avg,omitempty"`
+	TopPrompts   []CacheTopPrompt `json:"top_prompts,omitempty"`
 }
 
 // CacheTopPrompt is one frequently-served prompt for the dashboard.
@@ -363,9 +363,9 @@ type CacheLookupResult struct {
 	Similarity   float64   `json:"similarity,omitempty"`
 	BypassReason string    `json:"bypass_reason,omitempty"`
 	// Phase 5 trace fields.
-	LookupMS       float64      `json:"lookup_ms,omitempty"`
-	ReuseCount     int64        `json:"reuse_count,omitempty"`
-	LatencySavedMS int64        `json:"latency_saved_ms,omitempty"`
+	LookupMS       float64       `json:"lookup_ms,omitempty"`
+	ReuseCount     int64         `json:"reuse_count,omitempty"`
+	LatencySavedMS int64         `json:"latency_saved_ms,omitempty"`
 	Meta           *CacheHitMeta `json:"meta,omitempty"`
 	Trace          *CacheTrace   `json:"trace,omitempty"`
 }
@@ -441,12 +441,12 @@ type ReplayJob struct {
 // provider adapters consume. Payloads are diagnostic, not billing: they carry
 // no cost fields and are pruned with the request logs.
 type RequestPayload struct {
-	RequestID        string        `json:"request_id"`
-	TenantID         string        `json:"tenant_id,omitempty"`
-	Model            string        `json:"model,omitempty"`
-	Messages         []ChatMessage `json:"messages"`
-	MaxOutputTokens  int           `json:"max_output_tokens,omitempty"`
-	CreatedAt        time.Time     `json:"created_at"`
+	RequestID       string        `json:"request_id"`
+	TenantID        string        `json:"tenant_id,omitempty"`
+	Model           string        `json:"model,omitempty"`
+	Messages        []ChatMessage `json:"messages"`
+	MaxOutputTokens int           `json:"max_output_tokens,omitempty"`
+	CreatedAt       time.Time     `json:"created_at"`
 }
 
 // EvaluationRun groups one eval execution.

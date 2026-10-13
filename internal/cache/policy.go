@@ -10,25 +10,25 @@ import (
 // PolicyInput is everything the cache policy decision needs. It mirrors the
 // request flow order: authenticate → tenant/endpoint policy → cache decision.
 type PolicyInput struct {
-	TenantID     string
-	EndpointID   string
-	ProviderHint string
-	Model        string
-	Request      KeyInput
-	Stream       bool
-	CacheBypass  bool
-	Sensitive    bool
-	Sensitivity  string
-	HasTools     bool
-	ToolsSafe    bool
-	HasImages    bool
-	N            int
-	Temperature  *float64
-	Seed         *int
+	TenantID       string
+	EndpointID     string
+	ProviderHint   string
+	Model          string
+	Request        KeyInput
+	Stream         bool
+	CacheBypass    bool
+	Sensitive      bool
+	Sensitivity    string
+	HasTools       bool
+	ToolsSafe      bool
+	HasImages      bool
+	N              int
+	Temperature    *float64
+	Seed           *int
 	PolicyUseCache bool
 	PolicyID       string
 	EndpointCache  *bool
-	RequestBytes int
+	RequestBytes   int
 }
 
 // PolicyConfig are the global defaults the per-scope rows override.

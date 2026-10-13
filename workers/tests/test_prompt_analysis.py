@@ -46,33 +46,48 @@ class TestTokenEstimation(unittest.TestCase):
 
     def test_request_estimation_includes_message_framing(self) -> None:
         one = estimate_request_tokens({"messages": [{"role": "user", "content": "hi"}]})
-        ten = estimate_request_tokens({
-            "messages": [{"role": "user", "content": "hi"}] * 10
-        })
+        ten = estimate_request_tokens({"messages": [{"role": "user", "content": "hi"}] * 10})
         self.assertGreater(ten, one)
 
     def test_tool_declarations_are_counted(self) -> None:
         without = estimate_request_tokens(request())
-        with_tools = estimate_request_tokens(request(tools=[{
-            "type": "function",
-            "function": {
-                "name": "search_documents",
-                "description": "Search the document store for a query string",
-                "parameters": {"type": "object"},
-            },
-        }]))
+        with_tools = estimate_request_tokens(
+            request(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "search_documents",
+                            "description": "Search the document store for a query string",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ]
+            )
+        )
         self.assertGreater(with_tools, without)
 
     def test_tool_call_arguments_are_counted(self) -> None:
-        with_call = estimate_request_tokens(request(messages=[{
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{
-                "id": "call_1",
-                "type": "function",
-                "function": {"name": "search_documents", "arguments": "{\"query\":\"a very long query\"}"},
-            }],
-        }]))
+        with_call = estimate_request_tokens(
+            request(
+                messages=[
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "search_documents",
+                                    "arguments": '{"query":"a very long query"}',
+                                },
+                            }
+                        ],
+                    }
+                ]
+            )
+        )
         self.assertGreater(with_call, 0)
 
 
@@ -84,27 +99,35 @@ class TestCapabilityDetection(unittest.TestCase):
         self.assertIn("streaming", detect_capabilities(request(stream=True)))
 
     def test_tools_and_parallel_calls_are_detected(self) -> None:
-        capabilities = detect_capabilities(request(
-            tools=[{"type": "function", "function": {"name": "f", "parameters": {}}}],
-            parallel_tool_calls=True,
-        ))
+        capabilities = detect_capabilities(
+            request(
+                tools=[{"type": "function", "function": {"name": "f", "parameters": {}}}],
+                parallel_tool_calls=True,
+            )
+        )
         self.assertIn("tools", capabilities)
         self.assertIn("parallel_tools", capabilities)
 
     def test_vision_is_detected_from_content_parts(self) -> None:
-        capabilities = detect_capabilities(request(messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "what is this?"},
-                {"type": "image_url", "image_url": {"url": "https://example.invalid/a.png"}},
-            ],
-        }]))
+        capabilities = detect_capabilities(
+            request(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "what is this?"},
+                            {"type": "image_url", "image_url": {"url": "https://example.invalid/a.png"}},
+                        ],
+                    }
+                ]
+            )
+        )
         self.assertIn("vision", capabilities)
 
     def test_json_schema_implies_json_mode(self) -> None:
-        capabilities = detect_capabilities(request(
-            response_format={"type": "json_schema", "json_schema": {"name": "x"}}
-        ))
+        capabilities = detect_capabilities(
+            request(response_format={"type": "json_schema", "json_schema": {"name": "x"}})
+        )
         self.assertIn("json_schema", capabilities)
         self.assertIn("json_mode", capabilities)
 
@@ -118,9 +141,14 @@ class TestCapabilityDetection(unittest.TestCase):
         self.assertNotIn("reasoning", detect_capabilities(request(reasoning_effort="none")))
 
     def test_capabilities_are_sorted_for_stable_output(self) -> None:
-        capabilities = detect_capabilities(request(stream=True, tools=[
-            {"type": "function", "function": {"name": "f", "parameters": {}}},
-        ]))
+        capabilities = detect_capabilities(
+            request(
+                stream=True,
+                tools=[
+                    {"type": "function", "function": {"name": "f", "parameters": {}}},
+                ],
+            )
+        )
         self.assertEqual(list(capabilities), sorted(capabilities))
 
 
@@ -184,8 +212,9 @@ class TestSensitivePatterns(unittest.TestCase):
 class TestComplexity(unittest.TestCase):
     def test_short_single_turn_is_trivial(self) -> None:
         self.assertEqual(
-            classify_complexity(50, has_tools=False, has_code=False, has_image=False,
-                                message_count=1, reasoning=False),
+            classify_complexity(
+                50, has_tools=False, has_code=False, has_image=False, message_count=1, reasoning=False
+            ),
             "trivial",
         )
 
@@ -193,34 +222,44 @@ class TestComplexity(unittest.TestCase):
         # Tool use needs a model that can follow a schema, which is a quality
         # requirement rather than a size one.
         self.assertEqual(
-            classify_complexity(100, has_tools=True, has_code=False, has_image=False,
-                                message_count=1, reasoning=False),
+            classify_complexity(
+                100, has_tools=True, has_code=False, has_image=False, message_count=1, reasoning=False
+            ),
             "complex",
         )
 
     def test_code_or_images_escalate_to_moderate(self) -> None:
         self.assertEqual(
-            classify_complexity(500, has_tools=False, has_code=True, has_image=False,
-                                message_count=1, reasoning=False),
+            classify_complexity(
+                500, has_tools=False, has_code=True, has_image=False, message_count=1, reasoning=False
+            ),
             "moderate",
         )
         self.assertEqual(
-            classify_complexity(500, has_tools=False, has_code=False, has_image=True,
-                                message_count=1, reasoning=False),
+            classify_complexity(
+                500, has_tools=False, has_code=False, has_image=True, message_count=1, reasoning=False
+            ),
             "moderate",
         )
 
     def test_long_prompts_escalate_to_complex(self) -> None:
         self.assertEqual(
-            classify_complexity(LONG_CONTEXT_TOKENS + 1, has_tools=False, has_code=False,
-                                has_image=False, message_count=1, reasoning=False),
+            classify_complexity(
+                LONG_CONTEXT_TOKENS + 1,
+                has_tools=False,
+                has_code=False,
+                has_image=False,
+                message_count=1,
+                reasoning=False,
+            ),
             "complex",
         )
 
     def test_many_turns_escalate_to_moderate(self) -> None:
         self.assertEqual(
-            classify_complexity(400, has_tools=False, has_code=False, has_image=False,
-                                message_count=8, reasoning=False),
+            classify_complexity(
+                400, has_tools=False, has_code=False, has_image=False, message_count=8, reasoning=False
+            ),
             "moderate",
         )
 
@@ -229,8 +268,13 @@ class TestAnalyzeRequest(unittest.TestCase):
     def test_returns_a_complete_analysis(self) -> None:
         analysis = analyze_request(request(stream=True))
         for key in (
-            "prompt_tokens", "capabilities", "complexity", "suggested_quality_tier",
-            "suggested_strategy", "flags", "engine_version",
+            "prompt_tokens",
+            "capabilities",
+            "complexity",
+            "suggested_quality_tier",
+            "suggested_strategy",
+            "flags",
+            "engine_version",
         ):
             self.assertIn(key, analysis)
         self.assertIn("chat", analysis["capabilities"])
@@ -240,9 +284,9 @@ class TestAnalyzeRequest(unittest.TestCase):
     def test_long_prompt_gains_the_long_context_capability(self) -> None:
         # Routing to a small-window model would simply fail, so the requirement is
         # a capability rather than a preference.
-        analysis = analyze_request(request(messages=[
-            {"role": "user", "content": "x" * (LONG_CONTEXT_TOKENS * 4)}
-        ]))
+        analysis = analyze_request(
+            request(messages=[{"role": "user", "content": "x" * (LONG_CONTEXT_TOKENS * 4)}])
+        )
         self.assertIn("long_context", analysis["capabilities"])
         self.assertEqual(analysis["complexity"], "complex")
 
@@ -252,16 +296,27 @@ class TestAnalyzeRequest(unittest.TestCase):
         self.assertEqual(analysis["suggested_quality_tier"], 1)
 
     def test_complex_requests_suggest_the_quality_strategy(self) -> None:
-        analysis = analyze_request(request(tools=[
-            {"type": "function", "function": {"name": "f", "parameters": {}}},
-        ]))
+        analysis = analyze_request(
+            request(
+                tools=[
+                    {"type": "function", "function": {"name": "f", "parameters": {}}},
+                ]
+            )
+        )
         self.assertEqual(analysis["suggested_strategy"], "highest_quality")
         self.assertEqual(analysis["suggested_quality_tier"], 5)
 
     def test_sensitive_content_is_flagged_without_blocking(self) -> None:
-        analysis = analyze_request(request(messages=[
-            {"role": "user", "content": "my key is sk-abcdefghijklmnopqrstuvwx and my email is a@b.co"}
-        ]))
+        analysis = analyze_request(
+            request(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "my key is sk-abcdefghijklmnopqrstuvwx and my email is a@b.co",
+                    }
+                ]
+            )
+        )
         self.assertIn("contains_sensitive_data", analysis["flags"])
         self.assertIn("possible_credential_leak", analysis["flags"])
         # The analysis reports; it never refuses. A heuristic that silently drops
@@ -273,9 +328,9 @@ class TestAnalyzeRequest(unittest.TestCase):
         self.assertIn("prompt_exceeds_analysis_limit", analysis["flags"])
 
     def test_predominantly_non_ascii_is_flagged(self) -> None:
-        analysis = analyze_request(request(messages=[
-            {"role": "user", "content": "こんにちは、今日の天気を教えてください。"}
-        ]))
+        analysis = analyze_request(
+            request(messages=[{"role": "user", "content": "こんにちは、今日の天気を教えてください。"}])
+        )
         self.assertIn("predominantly_non_ascii", analysis["flags"])
 
     def test_completion_estimate_prefers_the_newer_field(self) -> None:

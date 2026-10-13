@@ -45,26 +45,26 @@ type RequestOutcome struct {
 	PolicyID       string
 	RequestType    domain.RequestType
 
-	Usage             domain.TokenUsage
-	Cost              domain.Cost
-	EstimateCost      domain.Cost
-	PricingVersionID  string
-	PricingSource     string
-	Breakdown         domain.CostBreakdown
-	EndpointID        string
-	LatencyMS         int64
-	ProviderLatencyMS int64
-	FirstTokenMS      int64
-	Attempts          int
-	FallbackUsed      bool
-	CacheHit          bool
-	CacheKind         string
-	CacheLookupMS     float64
-	CacheSimilarity   float64
-	CacheBypassReason string
-	CacheReuseCount   int64
+	Usage               domain.TokenUsage
+	Cost                domain.Cost
+	EstimateCost        domain.Cost
+	PricingVersionID    string
+	PricingSource       string
+	Breakdown           domain.CostBreakdown
+	EndpointID          string
+	LatencyMS           int64
+	ProviderLatencyMS   int64
+	FirstTokenMS        int64
+	Attempts            int
+	FallbackUsed        bool
+	CacheHit            bool
+	CacheKind           string
+	CacheLookupMS       float64
+	CacheSimilarity     float64
+	CacheBypassReason   string
+	CacheReuseCount     int64
 	CacheLatencySavedMS int64
-	Streaming         bool
+	Streaming           bool
 
 	Status       int
 	Outcome      domain.UsageOutcome
@@ -112,7 +112,7 @@ type queuedRecord struct {
 	usage   *domain.UsageRecord
 	log     *domain.RequestLog
 	payload *domain.RequestPayload
-	trace *domain.RequestTrace
+	trace   *domain.RequestTrace
 }
 
 // RecorderConfig configures the pipeline.
@@ -212,15 +212,15 @@ func (r *Recorder) RecordRequest(ctx context.Context, out RequestOutcome) {
 			RequestedModel:    out.RequestedModel,
 			PolicyID:          out.PolicyID,
 			RequestType:       out.RequestType,
-		Usage:             usage,
-		Cost:              out.Cost,
-		EstimateCost:      out.EstimateCost,
-		PricingVersionID:  out.PricingVersionID,
-		PricingSource:     out.PricingSource,
-		Breakdown:         out.Breakdown,
-		EndpointID:        out.EndpointID,
-		CostBeforeUSD:     out.CostBeforeUSD,
-		CostAfterUSD:      out.CostAfterUSD,
+			Usage:             usage,
+			Cost:              out.Cost,
+			EstimateCost:      out.EstimateCost,
+			PricingVersionID:  out.PricingVersionID,
+			PricingSource:     out.PricingSource,
+			Breakdown:         out.Breakdown,
+			EndpointID:        out.EndpointID,
+			CostBeforeUSD:     out.CostBeforeUSD,
+			CostAfterUSD:      out.CostAfterUSD,
 			LatencyMS:         out.LatencyMS,
 			ProviderLatencyMS: out.ProviderLatencyMS,
 			Attempts:          out.Attempts,
@@ -434,7 +434,7 @@ func (r *Recorder) run() {
 func (r *Recorder) flushBatch(ctx context.Context, batch []queuedRecord) {
 	var (
 		usageCount, logCount, traceCount, payloadCount int
-		failed                                        int
+		failed                                         int
 	)
 
 	for _, rec := range batch {

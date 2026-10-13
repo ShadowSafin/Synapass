@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-"github.com/shadowsafin/synapass/internal/config"
+	"github.com/shadowsafin/synapass/internal/config"
 	"github.com/shadowsafin/synapass/internal/dashboardauth"
 	"github.com/shadowsafin/synapass/internal/domain"
 	"github.com/shadowsafin/synapass/internal/storage"
@@ -64,7 +64,7 @@ func (s *DashboardAuditSink) Record(
 		ActorLabel: actor,
 		CreatedAt:  time.Now().UTC(),
 	}
-if details != nil {
+	if details != nil {
 		rec.After = details
 	}
 
@@ -135,17 +135,17 @@ func BuildDashboardAuth(
 	}
 
 	service := dashboardauth.NewService(dashboardauth.Options{
-		Users:   repos.DashboardUsers,
+		Users:    repos.DashboardUsers,
 		Sessions: repos.DashboardSessions,
-		Latch:   repos.Settings,
-		Audit:   NewDashboardAuditSink(repos.Audit, logger),
-		Logger:  logger,
+		Latch:    repos.Settings,
+		Audit:    NewDashboardAuditSink(repos.Audit, logger),
+		Logger:   logger,
 
 		PasswordRules:     rules,
 		SessionTTL:        dashboardCfg.SessionTTL.Std(),
 		IdleTTL:           dashboardCfg.IdleTTL.Std(),
 		MaxFailedAttempts: dashboardCfg.MaxFailedAttempts,
-LockoutDuration:   dashboardCfg.LockoutDuration.Std(),
+		LockoutDuration:   dashboardCfg.LockoutDuration.Std(),
 		MaxLockout:        dashboardCfg.MaxLockoutDuration.Std(),
 	})
 

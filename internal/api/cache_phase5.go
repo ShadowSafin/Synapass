@@ -58,8 +58,6 @@ func targetIf(cond bool, v string) string {
 	return ""
 }
 
-
-
 // cachePolicyScope maps a rule to the flush scope its change affects.
 func cachePolicyScope(p *domain.CachePolicy) string {
 	if p == nil {

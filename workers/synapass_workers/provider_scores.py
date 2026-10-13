@@ -7,7 +7,7 @@ gateway decisions agree.
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from .models import UsageEvent
 
@@ -60,8 +60,7 @@ def score_providers(
                 "fallback_rate": round(fallbacks, 4),
                 "score": round(score, 6),
                 "explanation": (
-                    f"success={success_rate:.2f} lat={avg_lat:.0f}ms "
-                    f"cost/success=${cps:.4f} (n={n})"
+                    f"success={success_rate:.2f} lat={avg_lat:.0f}ms cost/success=${cps:.4f} (n={n})"
                 ),
             }
         )

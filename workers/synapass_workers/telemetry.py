@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import threading
 from collections import deque
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Deque, Iterable, Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .models import UsageEvent
 from .scoring import percentile
@@ -53,8 +54,8 @@ class Rollup:
     latency_sum_ms: int = 0
     provider_latency_sum_ms: int = 0
     estimated_usage_requests: int = 0
-    latencies: Deque[int] = field(default_factory=lambda: deque(maxlen=2048))
-    last_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    latencies: deque[int] = field(default_factory=lambda: deque(maxlen=2048))
+    last_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def average_latency_ms(self) -> int:
@@ -110,7 +111,7 @@ class Rollup:
             "error_rate": self.error_rate,
             "fallback_rate": self.fallback_rate,
             "estimated_usage_requests": self.estimated_usage_requests,
-            "last_seen": self.last_seen.astimezone(timezone.utc).isoformat(),
+            "last_seen": self.last_seen.astimezone(UTC).isoformat(),
         }
 
 
@@ -134,7 +135,7 @@ class Aggregator:
             raise ValueError("max_samples must be positive")
         self.window_seconds = window_seconds
         self.max_samples = max_samples
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
         self._rollups: dict[tuple[str, str], Rollup] = {}
         # Lifetime totals also carry a bounded sample list, so the grand-total
@@ -156,7 +157,8 @@ class Aggregator:
             rollup = self._rollups.get(key)
             if rollup is None:
                 rollup = Rollup(
-                    provider=key[0], model=key[1],
+                    provider=key[0],
+                    model=key[1],
                     latencies=deque(maxlen=self.max_samples),
                 )
                 self._rollups[key] = rollup
@@ -222,18 +224,21 @@ class Aggregator:
         with self._lock:
             grouped: dict[str, dict[str, Any]] = {}
             for rollup in self._rollups.values():
-                entry = grouped.setdefault(rollup.provider, {
-                    "provider": rollup.provider,
-                    "models": 0,
-                    "requests": 0,
-                    "successes": 0,
-                    "errors": 0,
-                    "canceled": 0,
-                    "fallbacks": 0,
-                    "cost_usd": 0.0,
-                    "latency_sum_ms": 0,
-                    "latencies": [],
-                })
+                entry = grouped.setdefault(
+                    rollup.provider,
+                    {
+                        "provider": rollup.provider,
+                        "models": 0,
+                        "requests": 0,
+                        "successes": 0,
+                        "errors": 0,
+                        "canceled": 0,
+                        "fallbacks": 0,
+                        "cost_usd": 0.0,
+                        "latency_sum_ms": 0,
+                        "latencies": [],
+                    },
+                )
                 entry["models"] += 1
                 entry["requests"] += rollup.requests
                 entry["successes"] += rollup.successes
@@ -254,9 +259,7 @@ class Aggregator:
             entry["latency_p99_ms"] = int(percentile(latencies, 99))
             entry["average_latency_ms"] = int(entry["latency_sum_ms"] / requests) if requests else 0
             entry["success_rate"] = round(entry["successes"] / requests, 6) if requests else 0.0
-            entry["error_rate"] = (
-                round(entry["errors"] / considered, 6) if considered else 0.0
-            )
+            entry["error_rate"] = round(entry["errors"] / considered, 6) if considered else 0.0
             entry["fallback_rate"] = round(entry["fallbacks"] / requests, 6) if requests else 0.0
             entry["cost_usd"] = round(entry["cost_usd"], 8)
             entry["state"] = _health_state(entry["error_rate"], considered)
@@ -333,5 +336,5 @@ def rollup_payload(aggregator: Aggregator) -> Mapping[str, Any]:
         "providers": aggregator.provider_health(),
         "models": aggregator.snapshot(),
         "window_seconds": aggregator.window_seconds,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }

@@ -14,7 +14,8 @@ request ids, no free-form model names from unknown sources.
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class Metrics:
     enabled = True
 
     def __init__(self) -> None:
-        from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram  # noqa: PLC0415
+        from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
         self._registry = CollectorRegistry()
         self._counters: dict[tuple[str, tuple[str, ...]], Any] = {}
@@ -132,7 +133,7 @@ class Metrics:
 
     def start_server(self, addr: str) -> None:
         """Serve ``/metrics`` on ``addr`` in a background thread."""
-        from prometheus_client import start_http_server  # noqa: PLC0415
+        from prometheus_client import start_http_server
 
         host, port = _split_addr(addr)
         start_http_server(port, addr=host, registry=self._registry)
@@ -140,7 +141,7 @@ class Metrics:
 
     def render(self) -> str:
         """Render the current exposition text, used by the health endpoint."""
-        from prometheus_client import generate_latest  # noqa: PLC0415
+        from prometheus_client import generate_latest
 
         return generate_latest(self._registry).decode("utf-8", errors="replace")
 
@@ -209,17 +210,22 @@ def record_usage(metrics: NullMetrics | Metrics, event: Any) -> None:
     usage = event.usage
     if usage.prompt_tokens:
         metrics.increment(
-            METRIC_TOKENS_TOTAL, float(usage.prompt_tokens),
-            provider=event.provider or "unknown", kind="prompt",
+            METRIC_TOKENS_TOTAL,
+            float(usage.prompt_tokens),
+            provider=event.provider or "unknown",
+            kind="prompt",
         )
     if usage.completion_tokens:
         metrics.increment(
-            METRIC_TOKENS_TOTAL, float(usage.completion_tokens),
-            provider=event.provider or "unknown", kind="completion",
+            METRIC_TOKENS_TOTAL,
+            float(usage.completion_tokens),
+            provider=event.provider or "unknown",
+            kind="completion",
         )
     if event.cost_usd:
         metrics.increment(
-            METRIC_COST_USD_TOTAL, event.cost_usd,
+            METRIC_COST_USD_TOTAL,
+            event.cost_usd,
             tenant=event.tenant_id or "unknown",
         )
 

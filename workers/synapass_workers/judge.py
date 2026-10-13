@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ JUDGE_SYSTEM_PROMPT = (
     "You are an exacting but fair evaluator. You are given a reference answer and a "
     "candidate answer. Rate how well the candidate matches the reference on a scale "
     "from 0 to 10, where 0 is unrelated and 10 is fully correct and complete. "
-    "Reply with a single JSON object: {\"score\": <number>, \"rationale\": \"<one sentence>\"}. "
+    'Reply with a single JSON object: {"score": <number>, "rationale": "<one sentence>"}. '
     "Reply with nothing else."
 )
 
@@ -36,7 +37,7 @@ MIN_SCORE = 0.0
 MAX_SCORE = 10.0
 
 
-class JudgeUnavailable(RuntimeError):
+class JudgeUnavailableError(RuntimeError):
     """Raised when the judge endpoint is not configured or not reachable."""
 
 
@@ -52,7 +53,7 @@ class JudgeClient:
         timeout_seconds: float = 60.0,
     ) -> None:
         if not base_url or not model:
-            raise JudgeUnavailable("judge base_url and model must both be configured")
+            raise JudgeUnavailableError("judge base_url and model must both be configured")
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
@@ -64,10 +65,10 @@ class JudgeClient:
         Returns a mapping with ``score`` in the 0..10 range, ``normalised`` in
         0..1 so it can be compared with the deterministic metrics, ``rationale``,
         ``model`` and ``engine``. A transport or parse failure raises
-        :class:`JudgeUnavailable` so the caller can record that no verdict was
+        :class:`JudgeUnavailableError` so the caller can record that no verdict was
         obtained, rather than recording a zero.
         """
-        import httpx  # noqa: PLC0415
+        import httpx
 
         payload = {
             "model": self.model,
@@ -100,12 +101,12 @@ class JudgeClient:
                 )
                 response.raise_for_status()
                 body = response.json()
-        except Exception as exc:  # noqa: BLE001 - the transport is not ours
-            raise JudgeUnavailable(f"judge request failed: {exc}") from exc
+        except Exception as exc:
+            raise JudgeUnavailableError(f"judge request failed: {exc}") from exc
 
         content = _first_content(body)
         if not content:
-            raise JudgeUnavailable("the judge returned no content")
+            raise JudgeUnavailableError("the judge returned no content")
 
         parsed = _parse_verdict(content)
         raw_score = _clamp(float(parsed.get("score", 0.0)))
@@ -124,13 +125,13 @@ class JudgeClient:
         spending a completion: this is called at startup to decide whether judging
         is wired up, not to validate the model.
         """
-        import httpx  # noqa: PLC0415
+        import httpx
 
         try:
             with httpx.Client(timeout=min(self.timeout_seconds, 5.0)) as client:
                 response = client.get(f"{self.base_url}/models")
             return response.status_code < 500
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
 
@@ -179,15 +180,15 @@ def _parse_verdict(content: str) -> Mapping[str, Any]:
         # Fall back to the first integer found anywhere in the reply. This is the
         # difference between a usable verdict and a lost one for a model that
         # answers "Score: 8" instead of the requested object.
-        import re  # noqa: PLC0415
+        import re
 
         match = re.search(r"-?\d+(?:\.\d+)?", text)
         if not match:
-            raise JudgeUnavailable(f"the judge reply contained no score: {content[:200]!r}") from None
+            raise JudgeUnavailableError(f"the judge reply contained no score: {content[:200]!r}") from None
         return {"score": float(match.group(0)), "rationale": text[:200]}
 
     if not isinstance(parsed, Mapping):
-        raise JudgeUnavailable("the judge reply was not a JSON object")
+        raise JudgeUnavailableError("the judge reply was not a JSON object")
     return parsed
 
 

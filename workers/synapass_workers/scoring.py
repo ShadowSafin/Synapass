@@ -31,11 +31,11 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from typing import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 # Scorers are registered by the name used on the wire in an evaluation job, so a
 # job can request a metric without the caller knowing any Python.
-SCORERS: dict[str, "Scorer"] = {}
+SCORERS: dict[str, Scorer] = {}
 
 _WHITESPACE = re.compile(r"\s+")
 # Punctuation is stripped for normalised comparison but not for raw token counts:
@@ -44,8 +44,8 @@ _PUNCTUATION = re.compile(r"[^\w\s]", re.UNICODE)
 _TOKEN = re.compile(r"\w+", re.UNICODE)
 
 
-def _register(name: str) -> Callable[["Scorer"], "Scorer"]:
-    def decorator(scorer: "Scorer") -> "Scorer":
+def _register(name: str) -> Callable[[Scorer], Scorer]:
+    def decorator(scorer: Scorer) -> Scorer:
         SCORERS[name] = scorer
         return scorer
 
@@ -239,10 +239,7 @@ def rank_candidates(
     produces the same ranking. A ranking that reshuffles between runs makes an A/B
     comparison between two providers impossible to interpret.
     """
-    ranked = [
-        (candidate_id, composite_score(scores, weights))
-        for candidate_id, scores in scored.items()
-    ]
+    ranked = [(candidate_id, composite_score(scores, weights)) for candidate_id, scores in scored.items()]
     ranked.sort(key=lambda item: (-item[1], item[0]))
     return ranked
 

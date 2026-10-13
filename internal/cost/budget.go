@@ -16,13 +16,13 @@ import (
 // while utilization surfaces the damage, and the dashboard needs both.
 func Evaluate(b domain.Budget, spentUSD, limitUSD float64, now time.Time) domain.BudgetStatus {
 	st := domain.BudgetStatus{
-		TenantID:   b.TenantID,
-		Scope:      b.Scope,
-		Period:     b.Period,
-		LimitUSD:   limitUSD,
-		SpentUSD:   RoundMicro(spentUSD),
-		Enforced:   b.Enforced,
-		ResetAt:     b.ResetAt,
+		TenantID: b.TenantID,
+		Scope:    b.Scope,
+		Period:   b.Period,
+		LimitUSD: limitUSD,
+		SpentUSD: RoundMicro(spentUSD),
+		Enforced: b.Enforced,
+		ResetAt:  b.ResetAt,
 	}
 	st.RemainingUSD = RoundMicro(limitUSD - spentUSD)
 	if st.RemainingUSD < 0 {

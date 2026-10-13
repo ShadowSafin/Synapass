@@ -384,12 +384,12 @@ func (r *Runner) execute(ctx context.Context, evaluationID, tenantID, id string,
 	res := &domain.EvaluationResult{
 		ID: domain.NewID(), EvaluationID: evaluationID, RequestID: id,
 		Provider: tgt.ProviderName, Model: tgt.Model,
-		Score:           score,
-		LatencyMS:       latency,
-		CostUSD:         costUSD,
-		OutputPreview:   truncate(content, 500),
-		Metrics:         metrics,
-		CreatedAt:       domain.Now(),
+		Score:         score,
+		LatencyMS:     latency,
+		CostUSD:       costUSD,
+		OutputPreview: truncate(content, 500),
+		Metrics:       metrics,
+		CreatedAt:     domain.Now(),
 	}
 	return execution{result: res}
 }

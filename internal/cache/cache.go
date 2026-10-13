@@ -46,17 +46,17 @@ type Options struct {
 // DefaultOptions returns production-minded defaults.
 func DefaultOptions() Options {
 	return Options{
-		Enabled:           true,
-		ExactEnabled:      true,
-		SemanticEnabled:   true,
-		PrefixEnabled:     true,
-		TTL:               5 * time.Minute,
-		MaxResponseBytes:  256 << 10,
-		SemanticThreshold: 0.92,
-		PrefixLength:      256,
+		Enabled:            true,
+		ExactEnabled:       true,
+		SemanticEnabled:    true,
+		PrefixEnabled:      true,
+		TTL:                5 * time.Minute,
+		MaxResponseBytes:   256 << 10,
+		SemanticThreshold:  0.92,
+		PrefixLength:       256,
 		MaxSemanticEntries: 2000,
-		BypassTools:       true,
-		BypassLiveData:    true,
+		BypassTools:        true,
+		BypassLiveData:     true,
 	}
 }
 
@@ -177,10 +177,10 @@ func (c *Cache) Lookup(ctx context.Context, in KeyInput, bypass bool, bypassReas
 // policy) into the lookup. A non-positive SemThreshold keeps the global
 // default.
 type TierOverride struct {
-	AllowExact   bool
-	AllowPrefix  bool
+	AllowExact    bool
+	AllowPrefix   bool
 	AllowSemantic bool
-	SemThreshold float64
+	SemThreshold  float64
 }
 
 // LookupWithTiers is Lookup with per-request tier enforcement applied

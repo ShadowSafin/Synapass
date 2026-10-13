@@ -11,14 +11,14 @@ func almostEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 func TestEnrichRowDerivesRatesFromItsOwnCounts(t *testing.T) {
 	row := EnrichRow(domain.DimensionRow{
-		Key:        "openai",
-		Requests:   100,
-		Successes:  80,
-		Errors:     15,
-		Rejections: 5,
-		Fallbacks:  20,
-		CacheHits:  25,
-		CostUSD:    10,
+		Key:         "openai",
+		Requests:    100,
+		Successes:   80,
+		Errors:      15,
+		Rejections:  5,
+		Fallbacks:   20,
+		CacheHits:   25,
+		CostUSD:     10,
 		TotalTokens: 1000,
 	})
 
@@ -124,13 +124,13 @@ func TestCompareRatioAgainstZeroPreviousIsZeroNotInfinite(t *testing.T) {
 
 func TestBuildCacheEstimatesSavingsFromTheMissPopulation(t *testing.T) {
 	report := BuildCache(domain.CacheSplit{
-		Hits:       40,
-		Misses:     60,
-		HitAvgMS:   10,
-		MissAvgMS:  110,
+		Hits:        40,
+		Misses:      60,
+		HitAvgMS:    10,
+		MissAvgMS:   110,
 		MissCostUSD: 0.02,
-		HitTokens:  100,
-		MissTokens: 900,
+		HitTokens:   100,
+		MissTokens:  900,
 	})
 
 	if !almostEqual(report.HitRate, 0.4) {

@@ -43,7 +43,7 @@ class TestNormalization(unittest.TestCase):
     def test_normalizes_unicode_compatibility_forms(self) -> None:
         # Full-width characters are a common copy-paste artefact from CJK input
         # methods and must not defeat comparison.
-        self.assertEqual(normalize_text("ＡＢＣ"), normalize_text("ABC"))
+        self.assertEqual(normalize_text("ＡＢＣ"), normalize_text("ABC"))  # noqa: RUF001
 
     def test_empty_input_is_empty(self) -> None:
         self.assertEqual(normalize_text(""), "")

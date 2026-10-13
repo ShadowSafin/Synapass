@@ -328,7 +328,7 @@ func NewMetrics(cfg MetricsConfig) *Metrics {
 
 	m.CompletionTokensRatio = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "provider", Name: "completion_tokens_ratio",
-		Help: "Emitted completion tokens divided by the applied ceiling. A pile-up at 1.0 means the ceiling is cutting answers off.",
+		Help:    "Emitted completion tokens divided by the applied ceiling. A pile-up at 1.0 means the ceiling is cutting answers off.",
 		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1},
 	}, []string{"tenant", "provider"})
 

@@ -496,7 +496,7 @@ type ChatCompletionChunk struct {
 	Choices           []Choice          `json:"choices"`
 	Usage             *TokenUsage       `json:"usage,omitempty"`
 	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
-	Synapass        *ResponseMetadata `json:"synapass,omitempty"`
+	Synapass          *ResponseMetadata `json:"synapass,omitempty"`
 }
 
 // ObjectChatCompletionChunk is the chunk object discriminator.

@@ -21,12 +21,12 @@ import (
 // sections mutually consistent (they all describe the same instant) and avoids
 // a page that flickers section by section as separate requests land.
 type Report struct {
-	Window   domain.TimeRange     `json:"window"`
-	Interval string               `json:"interval"`
-	Summary  domain.UsageSummary  `json:"summary"`
-	Previous domain.UsageSummary  `json:"previous_summary"`
-	Buckets  []domain.TimeBucket  `json:"buckets"`
-	Compared []MetricDelta        `json:"comparison"`
+	Window   domain.TimeRange    `json:"window"`
+	Interval string              `json:"interval"`
+	Summary  domain.UsageSummary `json:"summary"`
+	Previous domain.UsageSummary `json:"previous_summary"`
+	Buckets  []domain.TimeBucket `json:"buckets"`
+	Compared []MetricDelta       `json:"comparison"`
 
 	Providers    []domain.DimensionRow `json:"providers"`
 	Models       []domain.DimensionRow `json:"models"`
@@ -93,11 +93,11 @@ type CacheReport struct {
 type RoutingReport struct {
 	Strategies []domain.StrategyRow `json:"strategies"`
 	// Requests and Fallbacks are totals across the strategies.
-	Requests   int64   `json:"requests"`
-	Fallbacks  int64   `json:"fallbacks"`
-	Errors     int64   `json:"errors"`
+	Requests     int64   `json:"requests"`
+	Fallbacks    int64   `json:"fallbacks"`
+	Errors       int64   `json:"errors"`
 	FallbackRate float64 `json:"fallback_rate"`
-	AvgAttempts   float64 `json:"avg_attempts"`
+	AvgAttempts  float64 `json:"avg_attempts"`
 	// ProviderSwitchRate is the share of requests where the router did not stay
 	// with its first choice. This is the honest measure of "how often does the
 	// router change its mind".

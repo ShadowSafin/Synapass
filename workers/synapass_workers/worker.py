@@ -14,13 +14,15 @@ redelivery budget is spent per concern.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import signal
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from . import ENGINE_VERSION, __version__
 from .bus import (
@@ -31,20 +33,21 @@ from .bus import (
     SUBJECT_PROMPT_ANALYSIS,
     SUBJECT_TELEMETRY_ROLLUP,
     SUBJECT_USAGE_RECORDED,
-    Bus,
     BusError,
     NullBus,
     decode,
 )
 from .config import Config
-from .jobs import UnknownJobKind, dispatch, parse_job
+from .jobs import UnknownJobKindError, dispatch, parse_job
 from .metrics import (
     METRIC_BUS_RECONNECTS_TOTAL,
     METRIC_ROLLUP_PUBLISHED_TOTAL,
-    build as build_metrics,
     record_analysis,
     record_job,
     record_usage,
+)
+from .metrics import (
+    build as build_metrics,
 )
 from .models import KIND_PROMPT_ANALYSIS, STATUS_FAILED, STATUS_OK, UsageEvent
 from .telemetry import Aggregator, rollup_payload
@@ -109,7 +112,7 @@ class Worker:
         if self.config.metrics_enabled:
             try:
                 self.metrics.start_server(self.config.metrics_addr)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # A metrics port conflict must not stop the worker from doing its
                 # actual job, but it must be loud.
                 logger.error("could not start the metrics server: %s", exc)
@@ -118,21 +121,17 @@ class Worker:
             self.bus.connect()
             self.bus.subscribe_jetstream(SUBJECT_EVAL_JOB, DURABLE_INTELLIGENCE, self.handle_job_message)
             self.bus.subscribe_jetstream(SUBJECT_USAGE_RECORDED, DURABLE_TELEMETRY, self.handle_usage_message)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # A worker that cannot reach NATS stays up serving metrics and
             # reporting degraded health rather than crash-looping. The gateway
             # does not depend on workers for inference, so this is the correct
             # failure mode for verification: the stack is inspectable while the
             # broker problem is fixed.
             logger.error("nats unavailable; workers running degraded: %s", exc)
-            try:
+            with contextlib.suppress(Exception):
                 self.metrics.increment("synapass_worker_bus_reconnects_total")
-            except Exception:  # noqa: BLE001
-                pass
 
-        self._rollup_thread = threading.Thread(
-            target=self._rollup_loop, name="rollup-publisher", daemon=True
-        )
+        self._rollup_thread = threading.Thread(target=self._rollup_loop, name="rollup-publisher", daemon=True)
         self._rollup_thread.start()
         logger.info(
             "worker started",
@@ -198,12 +197,14 @@ class Worker:
 
         try:
             job = parse_job(raw)
-        except UnknownJobKind as exc:
+        except UnknownJobKindError as exc:
             self.stats.decode_failures += 1
             logger.error("discarding a job with an unsupported kind: %s", exc)
             return
 
-        result = dispatch(job, tenant_id=self.config.default_tenant_id, max_tokens=self.config.analysis_max_tokens)
+        result = dispatch(
+            job, tenant_id=self.config.default_tenant_id, max_tokens=self.config.analysis_max_tokens
+        )
         duration = time.monotonic() - started
 
         self.stats.jobs_handled += 1
@@ -218,9 +219,7 @@ class Worker:
 
         payload_out = result.to_dict()
         payload_out["engine_version"] = ENGINE_VERSION
-        subject = (
-            SUBJECT_PROMPT_ANALYSIS if job.kind == KIND_PROMPT_ANALYSIS else SUBJECT_EVAL_RESULT
-        )
+        subject = SUBJECT_PROMPT_ANALYSIS if job.kind == KIND_PROMPT_ANALYSIS else SUBJECT_EVAL_RESULT
         self.bus.publish_json(subject, payload_out)
         self.stats.results_published += 1
 
@@ -282,7 +281,7 @@ class Worker:
             try:
                 self.aggregator.expire()
                 self.publish_rollup()
-            except Exception as exc:  # noqa: BLE001 - the loop must survive
+            except Exception as exc:
                 logger.error("failed to publish a telemetry rollup: %s", exc)
 
     # -- reporting ---------------------------------------------------------
@@ -296,7 +295,7 @@ class Worker:
             "status": "ok" if bus_stats.get("connected") else "degraded",
             "version": __version__,
             "engine_version": ENGINE_VERSION,
-            "started_at": datetime.fromtimestamp(self.stats.started_at or time.time(), tz=timezone.utc).isoformat(),
+            "started_at": datetime.fromtimestamp(self.stats.started_at or time.time(), tz=UTC).isoformat(),
             "stats": self.stats.as_dict(),
             "bus": bus_stats,
             "config": self.config.to_dict(redact=True),

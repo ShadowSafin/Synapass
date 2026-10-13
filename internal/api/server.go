@@ -160,10 +160,10 @@ type Server struct {
 	shaper     ShapingService
 	cache      ResponseCacheService
 	// plat is the platform cache (tenant/catalog/route/flags). Nil-safe.
-	plat       *platcache.Cache
-	scorer     ScoringService
-	guard      GuardrailService
-	replaySvc  ReplayService
+	plat      *platcache.Cache
+	scorer    ScoringService
+	guard     GuardrailService
+	replaySvc ReplayService
 	// replayRunner executes replay jobs in a background goroutine through
 	// the live provider adapters. Nil when the stores are absent; creation
 	// then persists a queued job that never runs, as before.
@@ -234,8 +234,8 @@ func NewServer(deps Deps) (*Server, error) {
 		tunnels:    deps.Tunnels,
 
 		dashboardAuth: deps.DashboardAuth,
-		startedAt:  deps.StartedAt,
-		priceCache: cost.NewPriceCache(priceCacheTTL),
+		startedAt:     deps.StartedAt,
+		priceCache:    cost.NewPriceCache(priceCacheTTL),
 	}
 
 	// The replay runner needs the request logs, the captured prompts, the

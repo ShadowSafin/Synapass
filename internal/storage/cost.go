@@ -115,9 +115,9 @@ func collectPricing(rows pgx.Rows) ([]domain.PricingVersion, error) {
 	var out []domain.PricingVersion
 	for rows.Next() {
 		var (
-			v       domain.PricingVersion
-			scope   string
-			effTo   *time.Time
+			v     domain.PricingVersion
+			scope string
+			effTo *time.Time
 		)
 		if err := rows.Scan(&v.ID, &scope, &v.ScopeID, &v.Currency,
 			&v.InputCostPerMillion, &v.OutputCostPerMillion, &v.CachedInputCostPerMillion,

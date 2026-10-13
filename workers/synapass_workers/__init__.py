@@ -24,7 +24,7 @@ metrics.
 
 from __future__ import annotations
 
-__all__ = ["__version__", "ENGINE_VERSION"]
+__all__ = ["ENGINE_VERSION", "__version__"]
 
 __version__ = "1.0.0"
 

@@ -51,14 +51,14 @@ func (d *capabilityDoer) Do(req *http.Request) (*http.Response, error) {
 func TestSyncModelsLearnsCapabilitiesFromRealAdapter(t *testing.T) {
 	doer := &capabilityDoer{}
 	adapter, err := providers.NewAdapter(domain.Provider{
-		ID:       "p1",
-		Name:     "bynara",
-		Kind:     domain.ProviderOpenAICompatible,
-		BaseURL:  "https://router.example/v1",
-		Status:   domain.StatusActive,
+		ID:      "p1",
+		Name:    "bynara",
+		Kind:    domain.ProviderOpenAICompatible,
+		BaseURL: "https://router.example/v1",
+		Status:  domain.StatusActive,
 	}, providers.Options{
-		
-		Client:        doer,
+
+		Client:           doer,
 		MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {

@@ -3,9 +3,8 @@
 import unittest
 
 from synapass_workers.jobs import EvalJob, dispatch
-from synapass_workers.models import KIND_REPLAY
+from synapass_workers.models import KIND_REPLAY, UsageEvent
 from synapass_workers.provider_scores import score_providers
-from synapass_workers.models import UsageEvent
 from synapass_workers.replay import build_replay_plan, select_requests, validate_replay_job
 from synapass_workers.task_classify import classify_task
 
@@ -66,9 +65,7 @@ class ProviderScoresTest(unittest.TestCase):
     def test_ranks_reliable_first(self):
         events = []
         for _ in range(10):
-            events.append(
-                UsageEvent(provider="good", outcome="success", latency_ms=100, cost_usd=0.001)
-            )
+            events.append(UsageEvent(provider="good", outcome="success", latency_ms=100, cost_usd=0.001))
         for i in range(10):
             events.append(
                 UsageEvent(

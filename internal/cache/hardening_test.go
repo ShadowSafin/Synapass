@@ -106,7 +106,7 @@ func hardInput(tenant, model, prompt string) KeyInput {
 	zero := 0.0
 	return KeyInput{
 		TenantID: tenant, APIKeyID: "key-1", Model: model,
-		Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: domain.NewTextContent(prompt)}},
+		Messages:    []domain.ChatMessage{{Role: domain.RoleUser, Content: domain.NewTextContent(prompt)}},
 		Temperature: &zero,
 	}
 }

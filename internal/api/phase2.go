@@ -215,9 +215,9 @@ func (s *Server) handleAdminCacheStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true,
-		"stats":   stats,
-		"config":  s.config.Cache,
+		"enabled":  true,
+		"stats":    stats,
+		"config":   s.config.Cache,
 		"platform": s.PlatformCacheHealth(r.Context()),
 	})
 }

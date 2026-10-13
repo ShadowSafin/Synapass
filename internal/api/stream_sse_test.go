@@ -138,8 +138,8 @@ func (w *delayedFlushWriter) Header() http.Header {
 	return w.header
 }
 func (w *delayedFlushWriter) Write(p []byte) (int, error) { return w.body.Write(p) }
-func (w *delayedFlushWriter) WriteHeader(int)            {}
-func (w *delayedFlushWriter) Flush()                     { time.Sleep(w.delay) }
+func (w *delayedFlushWriter) WriteHeader(int)             {}
+func (w *delayedFlushWriter) Flush()                      { time.Sleep(w.delay) }
 
 // TestSSESlowWriteHook proves slow downstream writes are reported without
 // failing delivery.

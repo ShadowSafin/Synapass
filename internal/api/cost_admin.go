@@ -202,13 +202,13 @@ func (s *Server) handleAdminPricingList(w http.ResponseWriter, r *http.Request) 
 
 // pricingCreateBody is the validated shape for minting a price sheet.
 type pricingCreateBody struct {
-	Scope                     string   `json:"scope"`
-	ScopeID                   string   `json:"scope_id"`
-	Currency                  string   `json:"currency"`
-	InputCostPerMillion       float64  `json:"input_cost_per_million"`
-	OutputCostPerMillion      float64  `json:"output_cost_per_million"`
-	CachedInputCostPerMillion float64  `json:"cached_input_cost_per_million"`
-	BaseFeeUSD                float64  `json:"base_fee_usd"`
+	Scope                     string     `json:"scope"`
+	ScopeID                   string     `json:"scope_id"`
+	Currency                  string     `json:"currency"`
+	InputCostPerMillion       float64    `json:"input_cost_per_million"`
+	OutputCostPerMillion      float64    `json:"output_cost_per_million"`
+	CachedInputCostPerMillion float64    `json:"cached_input_cost_per_million"`
+	BaseFeeUSD                float64    `json:"base_fee_usd"`
 	EffectiveFrom             *time.Time `json:"effective_from"`
 }
 
@@ -489,7 +489,7 @@ func (s *Server) handleAdminCostSavings(w http.ResponseWriter, r *http.Request) 
 	savings.CacheUSD = cost.RoundMicro(ov.CacheSavingsUSD)
 	savings.RoutingUSD = cost.RoundMicro(ov.RoutingSavingsUSD)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"savings": savings,
+		"savings":   savings,
 		"total_usd": savings.Total(),
 	})
 }

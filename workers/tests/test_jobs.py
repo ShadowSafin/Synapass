@@ -9,11 +9,12 @@ from synapass_workers.bus import (
     SUBJECT_EVAL_RESULT,
     SUBJECT_PROMPT_ANALYSIS,
     SUBJECT_TELEMETRY_ROLLUP,
+    BusError,
     NullBus,
     decode,
 )
 from synapass_workers.config import Config, ConfigError
-from synapass_workers.jobs import UnknownJobKind, analyze_job, dispatch, evaluate_job, parse_job
+from synapass_workers.jobs import UnknownJobKindError, analyze_job, dispatch, evaluate_job, parse_job
 from synapass_workers.metrics import NullMetrics
 from synapass_workers.models import (
     KIND_EVAL,
@@ -22,7 +23,6 @@ from synapass_workers.models import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_SKIPPED,
-    EvalCandidate,
     EvalJob,
 )
 from synapass_workers.telemetry import Aggregator
@@ -38,7 +38,12 @@ def eval_payload(**overrides):
         "reference": "Paris is the capital of France.",
         "candidates": [
             {"id": "a", "provider": "openai", "model": "gpt-4o", "output": "Paris is the capital of France."},
-            {"id": "b", "provider": "anthropic", "model": "claude", "output": "Lyon is the capital of France."},
+            {
+                "id": "b",
+                "provider": "anthropic",
+                "model": "claude",
+                "output": "Lyon is the capital of France.",
+            },
         ],
     }
     payload.update(overrides)
@@ -67,7 +72,7 @@ class TestParsing(unittest.TestCase):
         self.assertEqual(job.max_candidates, 64)
 
     def test_unsupported_kind_is_rejected(self) -> None:
-        with self.assertRaises(UnknownJobKind):
+        with self.assertRaises(UnknownJobKindError):
             parse_job({"id": "j", "kind": "summon_demon"})
 
     def test_job_id_falls_back_to_job_id_key(self) -> None:
@@ -98,10 +103,14 @@ class TestEvaluateJob(unittest.TestCase):
     def test_failed_candidates_are_skipped_not_scored(self) -> None:
         # Scoring an error message against a reference would enter a zero into an
         # average and quietly drag a provider's reported quality down.
-        job = parse_job(eval_payload(candidates=[
-            {"id": "ok", "output": "Paris is the capital of France."},
-            {"id": "broken", "output": "", "error": "upstream_error: connection reset"},
-        ]))
+        job = parse_job(
+            eval_payload(
+                candidates=[
+                    {"id": "ok", "output": "Paris is the capital of France."},
+                    {"id": "broken", "output": "", "error": "upstream_error: connection reset"},
+                ]
+            )
+        )
         result = evaluate_job(job)
 
         self.assertIn("broken", result.skipped)
@@ -109,9 +118,13 @@ class TestEvaluateJob(unittest.TestCase):
         self.assertEqual(result.winner, "ok")
 
     def test_failed_candidates_can_be_scored_on_request(self) -> None:
-        job = parse_job(eval_payload(candidates=[
-            {"id": "broken", "output": "", "error": "upstream_error"},
-        ]))
+        job = parse_job(
+            eval_payload(
+                candidates=[
+                    {"id": "broken", "output": "", "error": "upstream_error"},
+                ]
+            )
+        )
         result = evaluate_job(job, include_failures=True)
         self.assertIn("broken", result.scores)
         self.assertEqual(result.scores["broken"]["token_f1"], 0.0)
@@ -124,9 +137,13 @@ class TestEvaluateJob(unittest.TestCase):
         self.assertTrue(any("no output" in note for note in result.notes))
 
     def test_a_job_with_no_scoreable_candidates_is_skipped(self) -> None:
-        job = parse_job(eval_payload(candidates=[
-            {"id": "broken", "error": "upstream_error"},
-        ]))
+        job = parse_job(
+            eval_payload(
+                candidates=[
+                    {"id": "broken", "error": "upstream_error"},
+                ]
+            )
+        )
         result = evaluate_job(job)
         self.assertEqual(result.status, STATUS_SKIPPED)
         self.assertEqual(result.ranking, ())
@@ -160,15 +177,17 @@ class TestEvaluateJob(unittest.TestCase):
 
 class TestAnalyzeJob(unittest.TestCase):
     def test_analyses_an_embedded_request(self) -> None:
-        job = parse_job({
-            "id": "j",
-            "kind": KIND_PROMPT_ANALYSIS,
-            "request_id": "req-1",
-            "request": {
-                "model": "gpt-4o",
-                "messages": [{"role": "user", "content": "hello"}],
-            },
-        })
+        job = parse_job(
+            {
+                "id": "j",
+                "kind": KIND_PROMPT_ANALYSIS,
+                "request_id": "req-1",
+                "request": {
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            }
+        )
         analysis = analyze_job(job)
         self.assertEqual(analysis["request_id"], "req-1")
         self.assertIn("chat", analysis["capabilities"])
@@ -193,11 +212,15 @@ class TestDispatch(unittest.TestCase):
         self.assertIn("result", result.detail)
 
     def test_routes_a_prompt_analysis_job(self) -> None:
-        result = dispatch(parse_job({
-            "id": "j",
-            "kind": KIND_PROMPT_ANALYSIS,
-            "request": {"messages": [{"role": "user", "content": "hi"}]},
-        }))
+        result = dispatch(
+            parse_job(
+                {
+                    "id": "j",
+                    "kind": KIND_PROMPT_ANALYSIS,
+                    "request": {"messages": [{"role": "user", "content": "hi"}]},
+                }
+            )
+        )
         self.assertEqual(result.status, STATUS_OK)
         self.assertIn("analysis", result.detail)
 
@@ -247,11 +270,11 @@ class TestNullBusAndDecode(unittest.TestCase):
         self.assertTrue(bus.connected)
 
     def test_decode_rejects_non_json(self) -> None:
-        with self.assertRaises(Exception):
+        with self.assertRaises(BusError):
             decode(b"not json at all")
 
     def test_decode_rejects_a_non_object(self) -> None:
-        with self.assertRaises(Exception):
+        with self.assertRaises(BusError):
             decode(b"[1, 2, 3]")
 
     def test_decode_accepts_an_object(self) -> None:
@@ -279,11 +302,15 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(self.worker.stats.jobs_failed, 0)
 
     def test_routes_a_prompt_analysis_result_to_its_own_subject(self) -> None:
-        self.worker.handle_job_message(json.dumps({
-            "id": "j",
-            "kind": KIND_PROMPT_ANALYSIS,
-            "request": {"messages": [{"role": "user", "content": "hi"}]},
-        }).encode())
+        self.worker.handle_job_message(
+            json.dumps(
+                {
+                    "id": "j",
+                    "kind": KIND_PROMPT_ANALYSIS,
+                    "request": {"messages": [{"role": "user", "content": "hi"}]},
+                }
+            ).encode()
+        )
 
         self.assertEqual(len(self.bus.messages_for(SUBJECT_PROMPT_ANALYSIS)), 1)
         self.assertEqual(len(self.bus.messages_for(SUBJECT_EVAL_RESULT)), 0)
@@ -298,27 +325,35 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(self.bus.messages_for(SUBJECT_EVAL_RESULT), [])
 
     def test_a_failing_job_is_counted_and_still_publishes_a_result(self) -> None:
-        self.worker.handle_job_message(json.dumps({
-            "id": "j",
-            "kind": "eval",
-            "reference": "x",
-            "metrics": ["nonexistent_metric"],
-            "candidates": [{"id": "a", "output": "x"}],
-        }).encode())
+        self.worker.handle_job_message(
+            json.dumps(
+                {
+                    "id": "j",
+                    "kind": "eval",
+                    "reference": "x",
+                    "metrics": ["nonexistent_metric"],
+                    "candidates": [{"id": "a", "output": "x"}],
+                }
+            ).encode()
+        )
 
         self.assertEqual(self.worker.stats.jobs_failed, 1)
         published = self.bus.messages_for(SUBJECT_EVAL_RESULT)
         self.assertEqual(published[0]["status"], STATUS_FAILED)
 
     def test_usage_events_feed_the_aggregator(self) -> None:
-        self.worker.handle_usage_message(json.dumps({
-            "provider": "openai",
-            "model": "gpt-4o",
-            "outcome": "success",
-            "latency_ms": 120,
-            "cost": {"usd": 0.002},
-            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
-        }).encode())
+        self.worker.handle_usage_message(
+            json.dumps(
+                {
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "outcome": "success",
+                    "latency_ms": 120,
+                    "cost": {"usd": 0.002},
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+                }
+            ).encode()
+        )
 
         self.assertEqual(self.worker.stats.usage_events, 1)
         entry = self.worker.aggregator.snapshot()[0]
@@ -327,9 +362,15 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(entry["total_tokens"], 14)
 
     def test_publishes_a_rollup(self) -> None:
-        self.worker.handle_usage_message(json.dumps({
-            "provider": "openai", "model": "gpt-4o", "outcome": "success",
-        }).encode())
+        self.worker.handle_usage_message(
+            json.dumps(
+                {
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "outcome": "success",
+                }
+            ).encode()
+        )
         payload = self.worker.publish_rollup()
 
         self.assertIn("providers", payload)
@@ -345,7 +386,9 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertTrue(health["bus"]["connected"])
         self.assertIn("config", health)
         # Secrets must never appear in a health payload.
-        self.assertNotIn("provider_api_key", json.dumps(health["config"]).replace('"provider_api_key": ""', ""))
+        self.assertNotIn(
+            "provider_api_key", json.dumps(health["config"]).replace('"provider_api_key": ""', "")
+        )
 
     def test_stop_is_idempotent(self) -> None:
         self.worker.stop()
@@ -360,14 +403,16 @@ class TestConfiguration(unittest.TestCase):
         self.assertEqual(config.queue_group, "synapass-workers")
 
     def test_environment_overrides(self) -> None:
-        config = Config.from_env({
-            "SYNAPASS_WORKER_NATS_URL": "nats://nats:4222",
-            "SYNAPASS_WORKER_METRICS_ADDR": "127.0.0.1:9200",
-            "SYNAPASS_WORKER_LOG_LEVEL": "debug",
-            "SYNAPASS_WORKER_EVAL_CONCURRENCY": "8",
-            "SYNAPASS_WORKER_METRICS_ENABLED": "false",
-            "SYNAPASS_WORKER_LABELS": "pool=eval,region=eu",
-        })
+        config = Config.from_env(
+            {
+                "SYNAPASS_WORKER_NATS_URL": "nats://nats:4222",
+                "SYNAPASS_WORKER_METRICS_ADDR": "127.0.0.1:9200",
+                "SYNAPASS_WORKER_LOG_LEVEL": "debug",
+                "SYNAPASS_WORKER_EVAL_CONCURRENCY": "8",
+                "SYNAPASS_WORKER_METRICS_ENABLED": "false",
+                "SYNAPASS_WORKER_LABELS": "pool=eval,region=eu",
+            }
+        )
 
         self.assertEqual(config.nats_url, "nats://nats:4222")
         self.assertEqual(config.metrics_addr, "127.0.0.1:9200")

@@ -66,11 +66,11 @@ type ClientInfo struct {
 
 // Options configures the service.
 type Options struct {
-	Users   UserStore
+	Users    UserStore
 	Sessions SessionStore
-	Latch   LatchStore
-	Audit   AuditSink
-	Logger  *slog.Logger
+	Latch    LatchStore
+	Audit    AuditSink
+	Logger   *slog.Logger
 
 	// PasswordRules is the enforced policy. Zero value means the defaults.
 	PasswordRules PasswordRules
@@ -534,10 +534,10 @@ func truncate(s string, max int) string {
 // interface can state the rules instead of leaving an operator to guess.
 func (s *Service) Describe() Description {
 	return Description{
-		MinPasswordLength:  s.opts.PasswordRules.MinLength,
-		MaxPasswordLength:  s.opts.PasswordRules.MaxLength,
-		MaxFailedAttempts:  s.opts.MaxFailedAttempts,
-		SessionMinutes:     int(s.opts.SessionTTL.Minutes()),
+		MinPasswordLength: s.opts.PasswordRules.MinLength,
+		MaxPasswordLength: s.opts.PasswordRules.MaxLength,
+		MaxFailedAttempts: s.opts.MaxFailedAttempts,
+		SessionMinutes:    int(s.opts.SessionTTL.Minutes()),
 	}
 }
 

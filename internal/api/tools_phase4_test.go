@@ -44,10 +44,10 @@ type toolProvider struct {
 	// it keeps asking for the same tool. The policy bound is what has to stop it.
 	loopForever bool
 
-	mu       sync.Mutex
-	turns    [][]domain.ChatMessage
+	mu        sync.Mutex
+	turns     [][]domain.ChatMessage
 	seenTools [][]domain.Tool
-	refusals []string
+	refusals  []string
 }
 
 func (p *toolProvider) Name() string              { return p.name }

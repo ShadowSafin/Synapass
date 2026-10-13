@@ -532,6 +532,7 @@ func modelInfoPaths(baseURL string) []string {
 	}
 	return paths
 }
+
 // convertFinishReason maps the provider's finish reason onto the domain enum.
 func convertFinishReason(raw *string) *domain.FinishReason {
 	if raw == nil {

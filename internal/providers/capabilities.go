@@ -46,7 +46,7 @@ type capabilityClaims struct {
 	SupportsToolCalling     *bool `json:"supports_tool_calling"`
 	SupportsParallelCalls   *bool `json:"supports_parallel_function_calling"`
 	SupportsStreaming       *bool `json:"supports_streaming"`
-	SupportsVision         *bool `json:"supports_vision"`
+	SupportsVision          *bool `json:"supports_vision"`
 	SupportsResponseSchema  *bool `json:"supports_response_schema"`
 	SupportsJSONSchema      *bool `json:"supports_json_schema"`
 	SupportsJSONObject      *bool `json:"supports_json_object"`
@@ -56,8 +56,8 @@ type capabilityClaims struct {
 // derivatives disagree about whether the key is model_name or nested under
 // litellm_params, so both are read.
 type modelInfoEntry struct {
-	ModelName string          `json:"model_name"`
-	ModelInfo capabilityClaims `json:"model_info"`
+	ModelName    string           `json:"model_name"`
+	ModelInfo    capabilityClaims `json:"model_info"`
 	LiteLLMParam struct {
 		Model string `json:"model"`
 	} `json:"litellm_params"`

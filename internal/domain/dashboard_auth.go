@@ -12,7 +12,7 @@ import "time"
 
 // DashboardUser is a human operator account for the console.
 type DashboardUser struct {
-	ID   string `json:"id"`
+	ID string `json:"id"`
 	// Username is stored and compared lowercased, so login is case-insensitive.
 	Username string `json:"username"`
 	// PasswordHash is Argon2id in PHC string format. It never leaves the process.
@@ -34,8 +34,8 @@ func (u *DashboardUser) Locked(now time.Time) bool {
 
 // DashboardSession is one signed-in browser session.
 type DashboardSession struct {
-	ID         string `json:"id"`
-	UserID     string `json:"user_id"`
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
 	// TokenHash is the SHA-256 of the session token. The token itself is only
 	// ever in the client cookie.
 	TokenHash  string     `json:"-"`

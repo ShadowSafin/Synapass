@@ -18,32 +18,32 @@ import (
 // contract, routing policy and sensitivity. Anything less is how one tenant
 // serves another tenant's answer.
 type KeyInput struct {
-	TenantID    string
-	APIKeyID    string
-	Model       string
-	Provider    string
-	Messages    []domain.ChatMessage
-	Tools       []domain.Tool
-	ToolChoice  string
-	MaxTokens   int
-	Temperature *float64
-	TopP        *float64
-	TopK        *int
-	MinP        *float64
-	Repetition  *float64
-	Presence    *float64
-	Frequency   *float64
-	Seed        *int
-	N           int
-	FormatType  string
-	FormatSchema string
-	Reasoning   string
-	Stop        string
-	PolicyID    string
+	TenantID      string
+	APIKeyID      string
+	Model         string
+	Provider      string
+	Messages      []domain.ChatMessage
+	Tools         []domain.Tool
+	ToolChoice    string
+	MaxTokens     int
+	Temperature   *float64
+	TopP          *float64
+	TopK          *int
+	MinP          *float64
+	Repetition    *float64
+	Presence      *float64
+	Frequency     *float64
+	Seed          *int
+	N             int
+	FormatType    string
+	FormatSchema  string
+	Reasoning     string
+	Stop          string
+	PolicyID      string
 	PolicyVersion int
-	EndpointID  string
-	Sensitivity string
-	User        string
+	EndpointID    string
+	Sensitivity   string
+	User          string
 }
 
 // PromptHash is the stable hash of the normalized conversation.

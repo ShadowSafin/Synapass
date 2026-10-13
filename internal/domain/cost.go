@@ -46,9 +46,9 @@ type PricingVersion struct {
 	// the quoted currency's own units; no FX conversion is applied, because a
 	// gateway silently converting currencies would produce invoices nobody can
 	// reproduce from the price sheet.
-	Currency                string  `json:"currency"`
-	InputCostPerMillion     float64 `json:"input_cost_per_million"`
-	OutputCostPerMillion    float64 `json:"output_cost_per_million"`
+	Currency                  string  `json:"currency"`
+	InputCostPerMillion       float64 `json:"input_cost_per_million"`
+	OutputCostPerMillion      float64 `json:"output_cost_per_million"`
 	CachedInputCostPerMillion float64 `json:"cached_input_cost_per_million,omitempty"`
 	// BaseFeeUSD is charged once per billable attempt, for providers with a
 	// per-request overhead on top of token pricing.
@@ -124,13 +124,13 @@ func (b CostBreakdown) Total() Cost { return Cost{USD: b.TotalUSD} }
 // and exactly-once per budget/threshold/period: the unique constraint, not
 // application memory, is what prevents a second page for the same crossing.
 type BudgetAlert struct {
-	ID          string    `json:"id"`
-	BudgetID    string    `json:"budget_id"`
-	TenantID    string    `json:"tenant_id"`
-	ThresholdUSD float64  `json:"threshold_usd"`
-	SpentUSD    float64   `json:"spent_usd"`
-	LimitUSD    float64   `json:"limit_usd"`
-	Period      BudgetPeriod `json:"period"`
+	ID           string       `json:"id"`
+	BudgetID     string       `json:"budget_id"`
+	TenantID     string       `json:"tenant_id"`
+	ThresholdUSD float64      `json:"threshold_usd"`
+	SpentUSD     float64      `json:"spent_usd"`
+	LimitUSD     float64      `json:"limit_usd"`
+	Period       BudgetPeriod `json:"period"`
 	// PeriodStart anchors the alert to one budget period.
 	PeriodStart time.Time `json:"period_start"`
 	FiredAt     time.Time `json:"fired_at"`
@@ -154,10 +154,10 @@ type CostAnomaly struct {
 	Dimension string `json:"dimension"`
 	Key       string `json:"key"`
 	// WindowFrom/To bound the anomalous day (anomalies are detected daily).
-	WindowFrom time.Time `json:"window_from"`
-	WindowTo   time.Time `json:"window_to"`
-	ObservedUSD float64  `json:"observed_usd"`
-	ExpectedUSD float64  `json:"expected_usd"`
+	WindowFrom  time.Time `json:"window_from"`
+	WindowTo    time.Time `json:"window_to"`
+	ObservedUSD float64   `json:"observed_usd"`
+	ExpectedUSD float64   `json:"expected_usd"`
 	// Ratio is observed/expected, the single number that defines severity.
 	Ratio    float64         `json:"ratio"`
 	Severity AnomalySeverity `json:"severity"`
@@ -168,22 +168,22 @@ type CostAnomaly struct {
 
 // BudgetStatus is the evaluated state of one budget for the dashboard.
 type BudgetStatus struct {
-	BudgetID   string       `json:"budget_id"`
-	TenantID   string       `json:"tenant_id"`
-	Scope      string       `json:"scope"`
-	Period     BudgetPeriod `json:"period"`
-	LimitUSD   float64      `json:"limit_usd"`
-	SpentUSD   float64      `json:"spent_usd"`
-	RemainingUSD float64    `json:"remaining_usd"`
+	BudgetID     string       `json:"budget_id"`
+	TenantID     string       `json:"tenant_id"`
+	Scope        string       `json:"scope"`
+	Period       BudgetPeriod `json:"period"`
+	LimitUSD     float64      `json:"limit_usd"`
+	SpentUSD     float64      `json:"spent_usd"`
+	RemainingUSD float64      `json:"remaining_usd"`
 	// Utilization is spent/limit in [0, +inf); above 1 means overspent.
 	Utilization float64 `json:"utilization"`
 	// BurnRate is the fraction of the period's budget consumed per elapsed
 	// fraction: 1.0 means exactly on pace, above 1 means burning too fast.
 	BurnRate float64 `json:"burn_rate"`
 	// ProjectedUSD is the end-of-period spend at the current pace.
-	ProjectedUSD float64 `json:"projected_usd"`
-	Exhausted    bool    `json:"exhausted"`
-	Enforced     bool    `json:"enforced"`
+	ProjectedUSD float64   `json:"projected_usd"`
+	Exhausted    bool      `json:"exhausted"`
+	Enforced     bool      `json:"enforced"`
 	ResetAt      time.Time `json:"reset_at"`
 }
 
@@ -198,9 +198,9 @@ type CostForecast struct {
 	ProjectedMonthUSD float64 `json:"projected_month_usd"`
 	// ProjectedMonthLow/HighUSD bound the projection by one residual standard
 	// deviation, so finance sees a range rather than a false point promise.
-	ProjectedMonthLowUSD  float64 `json:"projected_month_low_usd"`
-	ProjectedMonthHighUSD float64 `json:"projected_month_high_usd"`
-	DaysObserved          int     `json:"days_observed"`
+	ProjectedMonthLowUSD  float64   `json:"projected_month_low_usd"`
+	ProjectedMonthHighUSD float64   `json:"projected_month_high_usd"`
+	DaysObserved          int       `json:"days_observed"`
 	GeneratedAt           time.Time `json:"generated_at"`
 }
 
@@ -223,8 +223,8 @@ type CostOverview struct {
 	CostPerKiloTokenUSD float64 `json:"cost_per_kilo_token_usd"`
 	// CacheSavingsUSD is spend avoided by served-from-cache responses;
 	// RoutingSavingsUSD is spend avoided by shaping/optimization choices.
-	CacheSavingsUSD   float64 `json:"cache_savings_usd"`
-	RoutingSavingsUSD float64 `json:"routing_savings_usd"`
+	CacheSavingsUSD   float64   `json:"cache_savings_usd"`
+	RoutingSavingsUSD float64   `json:"routing_savings_usd"`
 	GeneratedAt       time.Time `json:"generated_at"`
 }
 
@@ -241,8 +241,8 @@ type CostDimensionRow struct {
 
 // CostPoint is one bucket of a spend time series.
 type CostPoint struct {
-	Bucket    time.Time `json:"bucket"`
-	Requests  int64     `json:"requests"`
-	ActualUSD float64   `json:"actual_usd"`
-	EstimatedUSD float64 `json:"estimated_usd"`
+	Bucket       time.Time `json:"bucket"`
+	Requests     int64     `json:"requests"`
+	ActualUSD    float64   `json:"actual_usd"`
+	EstimatedUSD float64   `json:"estimated_usd"`
 }

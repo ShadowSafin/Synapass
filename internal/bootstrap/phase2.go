@@ -340,7 +340,7 @@ func (a *CacheAdapter) Evaluate(in domain.CacheEvalInput) domain.CacheDecision {
 		N: in.N, Temperature: in.Temperature, Seed: in.Seed,
 		PolicyUseCache: in.PolicyUseCache, PolicyID: in.PolicyID,
 		EndpointCache: in.EndpointCache,
-		Request: cache.KeyInput{Messages: messagePreview(in.PromptText)},
+		Request:       cache.KeyInput{Messages: messagePreview(in.PromptText)},
 	}, cache.PolicyConfig{
 		Enabled: opts.Enabled, ExactEnabled: opts.ExactEnabled,
 		SemanticEnabled: opts.SemanticEnabled, PrefixEnabled: opts.PrefixEnabled,

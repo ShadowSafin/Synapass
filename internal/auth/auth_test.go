@@ -195,8 +195,8 @@ func TestExtractToken(t *testing.T) {
 		// A bare token is accepted because several SDK configurations and shell
 		// one-liners send the key without the scheme.
 		"syn_live_abc123": "syn_live_abc123",
-		"":               "",
-		"   ":            "",
+		"":                "",
+		"   ":             "",
 	}
 
 	for header, want := range cases {

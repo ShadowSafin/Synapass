@@ -9,7 +9,8 @@ batch/offline.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 TASKS = (
     "chat",
@@ -30,9 +31,7 @@ _TRANSLATE = re.compile(r"translat", re.IGNORECASE)
 _EXTRACT = re.compile(r"\bextract\b|pull out|list all|find all", re.IGNORECASE)
 _REASON = re.compile(r"prove|step by step|chain of thought|theorem|\bqed\b", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"```")
-_CODE_KW = re.compile(
-    r"\b(def|class|func|function|import|package|return|const|let|SELECT)\b"
-)
+_CODE_KW = re.compile(r"\b(def|class|func|function|import|package|return|const|let|SELECT)\b")
 
 
 def _messages_text(request: Mapping[str, Any]) -> str:
@@ -68,10 +67,10 @@ def classify_task(
     tools = request.get("tools")
     has_tools = isinstance(tools, (list, tuple)) and len(tools) > 0
     response_format = request.get("response_format")
-    wants_structured = (
-        isinstance(response_format, Mapping)
-        and str(response_format.get("type", "")) in {"json_object", "json_schema"}
-    )
+    wants_structured = isinstance(response_format, Mapping) and str(response_format.get("type", "")) in {
+        "json_object",
+        "json_schema",
+    }
     streaming = bool(request.get("stream"))
 
     if has_tools:

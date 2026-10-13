@@ -138,7 +138,7 @@ func fakeBinary(t *testing.T, url string) string {
 func TestCreateStopLifecycle(t *testing.T) {
 	store := &fakeStore{}
 	m := NewManager(Config{
-		Binary: fakeBinary(t, "https://test-tunnel-123.trycloudflare.com"),
+		Binary:         fakeBinary(t, "https://test-tunnel-123.trycloudflare.com"),
 		StartupTimeout: 10 * time.Second,
 	}, "http://127.0.0.1:8080", store, nil)
 

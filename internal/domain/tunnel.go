@@ -64,7 +64,7 @@ type TunnelSession struct {
 	TargetAddr string `json:"target_addr"`
 	// PublicURL is the minted https://*.trycloudflare.com URL. Empty until
 	// the process prints it.
-	PublicURL string `json:"public_url,omitempty"`
+	PublicURL string       `json:"public_url,omitempty"`
 	Status    TunnelStatus `json:"status"`
 	// StartedAt is when the process was spawned; URLAt is when the public URL
 	// was first captured. The gap between them is the tunnel setup latency.

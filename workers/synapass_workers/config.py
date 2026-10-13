@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 # Environment prefix. ``SYNAPASS_WORKER_`` is used rather than ``SYNAPASS_`` so a worker and
 # the control plane can share an environment without one silently reconfiguring
@@ -127,8 +128,7 @@ class Config:
     def __post_init__(self) -> None:
         if self.provider_url and not self.provider_model:
             raise ConfigError(
-                "provider_url is set but provider_model is empty; "
-                "name the model the judge endpoint expects"
+                "provider_url is set but provider_model is empty; name the model the judge endpoint expects"
             )
 
     @property
@@ -172,7 +172,7 @@ class Config:
         return out
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> "Config":
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
         """Build a configuration from the environment."""
         env = os.environ if environ is None else environ
 
@@ -189,8 +189,10 @@ class Config:
             provider_api_key=_env(env, ENV_PREFIX + "PROVIDER_API_KEY"),
             provider_model=_env(env, ENV_PREFIX + "PROVIDER_MODEL"),
             provider_timeout_seconds=_env_float(
-                env, ENV_PREFIX + "PROVIDER_TIMEOUT_SECONDS",
-                default=DEFAULT_HTTP_TIMEOUT_SECONDS, minimum=1.0,
+                env,
+                ENV_PREFIX + "PROVIDER_TIMEOUT_SECONDS",
+                default=DEFAULT_HTTP_TIMEOUT_SECONDS,
+                minimum=1.0,
             ),
             analysis_max_tokens=_env_int(
                 env, ENV_PREFIX + "ANALYSIS_MAX_TOKENS", default=DEFAULT_ANALYSIS_MAX_TOKENS
@@ -213,7 +215,7 @@ class Config:
 
         return config
 
-    def with_overrides(self, **overrides: Any) -> "Config":
+    def with_overrides(self, **overrides: Any) -> Config:
         """Return a copy with the given fields replaced."""
         return replace(self, **overrides)
 
@@ -231,8 +233,7 @@ class Config:
                 import yaml  # type: ignore[import-not-found]
             except ImportError as exc:  # pragma: no cover - depends on the host
                 raise ConfigError(
-                    "reading a YAML config file requires PyYAML; "
-                    "install it or use a JSON config file"
+                    "reading a YAML config file requires PyYAML; install it or use a JSON config file"
                 ) from exc
             loaded = yaml.safe_load(text)
         else:

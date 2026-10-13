@@ -61,7 +61,7 @@ func writeError(w http.ResponseWriter, err error, meta *domain.ResponseMetadata)
 	// The metadata block is attached to errors as well as successes, so a client
 	// that logs the failure also captures which provider and policy were involved.
 	body := struct {
-		Error      domain.ErrorBody         `json:"error"`
+		Error    domain.ErrorBody         `json:"error"`
 		Synapass *domain.ResponseMetadata `json:"synapass,omitempty"`
 	}{
 		Error: domain.ErrorBody{
