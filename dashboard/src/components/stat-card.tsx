@@ -68,14 +68,14 @@ export function StatCard({ label, value, delta, hint, icon: Icon, tone = 'defaul
       : null;
 
   return (
-    <div className={cn('rounded-2xl border border-white/[0.07] bg-card/90 p-5 shadow-sm transition-all hover:border-white/[0.12]', className)}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">{label}</p>
-        {Icon ? <Icon className="size-4 text-neutral-500" /> : null}
+    <div className={cn('min-w-0 rounded-2xl border border-white/[0.07] bg-card/90 p-4 shadow-sm transition-all hover:border-white/[0.12] sm:p-5', className)}>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">{label}</p>
+        {Icon ? <Icon className="size-4 shrink-0 text-neutral-500" /> : null}
       </div>
-      <p className={cn('mt-3 text-[26px] font-semibold leading-none tracking-tight tabular-nums text-white', TONE_VALUE[tone])}>{value}</p>
+      <p className={cn('mt-3 break-words text-2xl font-semibold leading-tight tracking-tight tabular-nums text-white sm:text-[26px] sm:leading-none', TONE_VALUE[tone])}>{value}</p>
       {rendered ? (
-        <div className="mt-2.5 flex items-center gap-1.5 text-xs">
+        <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
           <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium', rendered.badgeClass)}>
             <rendered.Icon className="size-3" />
             {rendered.text}
@@ -83,7 +83,7 @@ export function StatCard({ label, value, delta, hint, icon: Icon, tone = 'defaul
           {delta?.label ? <span className="text-[11px] text-neutral-400">vs {delta.label}</span> : null}
         </div>
       ) : null}
-      {hint ? <p className="mt-2 text-xs text-neutral-400">{hint}</p> : null}
+      {hint ? <p className="mt-2 break-words text-xs text-neutral-400">{hint}</p> : null}
     </div>
   );
 }

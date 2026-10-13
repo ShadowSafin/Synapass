@@ -90,7 +90,7 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn('relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.015] p-10 text-center', className)}>
+    <div className={cn('relative flex min-w-0 flex-col items-center gap-2 overflow-hidden rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.015] p-6 text-center sm:p-10', className)}>
       <DotPattern className="fill-white/[0.05] [mask-image:radial-gradient(320px_circle_at_center,white,transparent)]" />
       <div className="relative z-10 flex flex-col items-center gap-2">
         <Inbox className="size-6 text-neutral-500" />

@@ -95,12 +95,12 @@ function UrlFilterSelect({
   };
 
   return (
-    <label className="inline-flex items-center gap-2 text-xs text-neutral-400">
+    <label className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs text-neutral-400">
       <span className="sr-only">{label}</span>
       <select
         value={value}
         onChange={(event) => window.location.assign(hrefFor(event.target.value))}
-        className="h-8.5 max-w-[180px] rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 shadow-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+        className="h-8.5 max-w-[calc(100vw-2rem)] truncate rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 shadow-sm focus:outline-none focus:ring-1 focus:ring-primary/50 sm:max-w-[180px]"
       >
         <option value="">{allLabel}</option>
         {options.map((option) => (
@@ -688,10 +688,11 @@ export function AnalyticsView() {
         </CardContent>
       </Card>
 
-      {/* Provider + model rankings, with a shared sort control. */}
-      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-        <span>Rank by</span>
-        <div className="inline-flex items-center rounded-xl border border-white/[0.08] bg-white/[0.02] p-1">
+      {/* Provider + model rankings, with a shared sort control. Wraps and scrolls
+          on phones instead of pushing the page sideways. */}
+      <div className="flex flex-wrap items-center justify-start gap-2 text-xs text-muted-foreground sm:justify-end">
+        <span className="shrink-0">Rank by</span>
+        <div className="inline-flex max-w-full flex-wrap items-center gap-0.5 overflow-x-auto rounded-xl border border-white/[0.08] bg-white/[0.02] p-1 [-webkit-overflow-scrolling:touch]">
           {SORTS.map((option) => (
             <button
               key={option.value}
@@ -700,8 +701,8 @@ export function AnalyticsView() {
               aria-pressed={sort === option.value}
               className={
                 sort === option.value
-                  ? 'rounded-lg bg-white/[0.1] px-2.5 py-1 font-medium text-white'
-                  : 'rounded-lg px-2.5 py-1 text-neutral-400 transition-colors hover:text-white'
+                  ? 'shrink-0 rounded-lg bg-white/[0.1] px-2.5 py-1 font-medium text-white'
+                  : 'shrink-0 rounded-lg px-2.5 py-1 text-neutral-400 transition-colors hover:text-white'
               }
             >
               {option.label}
@@ -1010,7 +1011,7 @@ export function AnalyticsView() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-1 gap-3 text-center sm:grid-cols-3">
               {[
                 { label: 'Calls (all time)', value: formatNumber(toolStats.total) },
                 { label: 'Failures (recent)', value: formatNumber(toolStats.failed) },

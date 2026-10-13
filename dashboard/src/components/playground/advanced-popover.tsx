@@ -74,7 +74,7 @@ export function AdvancedFields({
       </SectionCard>
 
       <SectionCard title="Sampling" summary={samplingSummary(config)}>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
           <NumberField
             label="Temperature"
             value={config.temperature}
@@ -171,7 +171,7 @@ export function AdvancedFields({
           onChange={(next) => onChange({ noCache: next })}
           disabled={disabled}
         />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
           <NumberField
             label="Max cost (USD)"
             value={config.maxCostUsd}
@@ -189,7 +189,7 @@ export function AdvancedFields({
             onChange={(value) => onChange({ latencyTargetMs: value })}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
           <Field label="Region" hint="Pins provider geography.">
             <Input
               placeholder="any"

@@ -662,7 +662,10 @@ export function DraggableWidgetGrid({
 	const [items, setItems] = useState(() => initialItems ?? DEFAULT_ITEMS)
 	const grid = useRef(null as HTMLDivElement | null)
 	const hintId = useId()
-	const minColumns = Math.min(2, Math.max(1, maxColumns))
+	// One column on phones (stacked, full-width widgets), up to maxColumns on
+	// desktop. Forcing two columns at 320px would squeeze every small widget
+	// to ~138px and overflow its figures.
+	const minColumns = 1
 
 	const [metrics, setMetrics] = useState({ unit: 0, columns: 0 })
 	useIsoLayoutEffect(() => {

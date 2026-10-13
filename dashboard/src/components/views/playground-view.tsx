@@ -150,8 +150,8 @@ function ComparisonTable({ a, b }: { a: PlaygroundRun | null; b: PlaygroundRun |
   ];
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-white/15 bg-neutral-950/70 shadow-xl backdrop-blur-md">
-      <table className="w-full text-[12px]">
+    <div className="overflow-x-auto rounded-2xl border border-white/15 bg-neutral-950/70 shadow-xl backdrop-blur-md [-webkit-overflow-scrolling:touch]">
+      <table className="w-full min-w-[480px] text-[12px]">
         <thead>
           <tr className="border-b border-white/10 text-left text-[11px] uppercase tracking-wide text-neutral-400">
             <th className="px-3 py-2 font-medium">Metric</th>
@@ -606,8 +606,8 @@ export function PlaygroundView() {
           )}
         >
           {compareOn ? (
-            <div className="flex w-full max-w-[480px] items-center gap-1.5">
-              <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-neutral-950/80 py-1 pl-2.5 pr-1 text-white shadow backdrop-blur">
+            <div className="flex w-full max-w-[480px] flex-col gap-1.5 min-[480px]:flex-row min-[480px]:items-center">
+              <label className="flex min-w-0 w-full items-center gap-1.5 rounded-full bg-neutral-950/80 py-1 pl-2.5 pr-1 text-white shadow backdrop-blur min-[480px]:flex-1">
                 <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-white/60">
                   A
                 </span>
@@ -625,10 +625,10 @@ export function PlaygroundView() {
                   ))}
                 </select>
               </label>
-              <span aria-hidden className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-neutral-800/60">
+              <span aria-hidden className="shrink-0 self-center text-[10px] font-bold uppercase tracking-wide text-neutral-800/60">
                 vs
               </span>
-              <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-neutral-950/80 py-1 pl-2.5 pr-1 text-white shadow backdrop-blur">
+              <label className="flex min-w-0 w-full items-center gap-1.5 rounded-full bg-neutral-950/80 py-1 pl-2.5 pr-1 text-white shadow backdrop-blur min-[480px]:flex-1">
                 <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-white/60">
                   B
                 </span>

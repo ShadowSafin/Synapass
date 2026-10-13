@@ -92,6 +92,13 @@
 
   html {
     color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    overflow-x: clip;
+    overscroll-behavior-x: none;
   }
 
   body {
@@ -100,6 +107,35 @@
        are worth pinning so id-like strings stay unambiguous. */
     font-feature-settings: 'liga' 1, 'calt' 1;
     text-rendering: optimizeLegibility;
+    /* Touch: no delay on tap, no grey flash on press. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Media never forces a page wider than the viewport. SVG charts already
+     scale via viewBox; this is the backstop for raster and pasted content. */
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  /* Long ids, hashes and URLs wrap instead of pushing the layout sideways.
+     Tables and scrollable code blocks opt out via their own containers. */
+  :where(p, li, dd, dt, h1, h2, h3):not(td *):not(th *) {
+    overflow-wrap: break-word;
+  }
+
+  /* iOS zooms any field under 16px on focus, which hides the form the
+     operator is filling. Hold 16px on phones so focus never moves the
+     viewport; desktop keeps the compact 12px sizing. */
+  @media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 
   /* Browser surfaces carry the design too: selection, caret, scrollbars and

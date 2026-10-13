@@ -222,9 +222,9 @@ export function ResponsePanel({
   const copyText = view === 'raw' ? rawText : view === 'request' ? requestText : answer;
 
   return (
-    <div className="flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-card/95">
-      <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-4 py-3">
-        <div className="flex gap-1 rounded-lg border border-white/[0.07] bg-white/[0.02] p-0.5">
+    <div className="flex min-h-[320px] min-w-0 flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-card/95 sm:min-h-[420px]">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/[0.06] px-3 py-3 sm:px-4">
+        <div className="flex shrink-0 gap-1 rounded-lg border border-white/[0.07] bg-white/[0.02] p-0.5">
           {VIEWS.map((item) => (
             <button
               key={item.id}
@@ -257,7 +257,7 @@ export function ResponsePanel({
           </span>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1">
           {route.provider ? <Chip label="provider" value={route.provider} tone="info" /> : null}
           {route.model ? <Chip label="model" value={route.model} /> : null}
           {route.cache_hit ? <Chip label="cache" value="hit" tone="success" /> : null}
@@ -266,7 +266,7 @@ export function ResponsePanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-5">
         {error ? (
           <ErrorCard error={error} onRetry={onRetry} />
         ) : view === 'answer' ? (

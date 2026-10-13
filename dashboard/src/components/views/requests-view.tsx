@@ -148,10 +148,10 @@ export function RequestsView() {
       />
 
       <Card className="mb-4">
-        <CardContent className="flex flex-wrap items-end gap-3 pt-5 sm:pt-6">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        <CardContent className="flex flex-col gap-3 pt-4 sm:flex-row sm:flex-wrap sm:items-end sm:pt-6">
+          <label className="flex w-full flex-col gap-1 text-xs text-muted-foreground sm:w-auto">
             Outcome
-            <Select value={outcome} onChange={(event) => setOutcome(event.target.value)} className="w-36">
+            <Select value={outcome} onChange={(event) => setOutcome(event.target.value)} className="w-full sm:w-36">
               {OUTCOMES.map((value) => (
                 <option key={value || 'all'} value={value}>
                   {value === '' ? 'All outcomes' : value}
@@ -160,32 +160,32 @@ export function RequestsView() {
             </Select>
           </label>
 
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          <label className="flex w-full flex-col gap-1 text-xs text-muted-foreground sm:w-auto">
             Provider
             <Input
               value={provider}
               onChange={(event) => setProvider(event.target.value)}
               placeholder="exact provider name"
-              className="w-48"
+              className="w-full sm:w-48"
             />
           </label>
 
           <form
-            className="flex flex-col gap-1 text-xs text-muted-foreground"
+            className="flex w-full flex-col gap-1 text-xs text-muted-foreground sm:w-auto"
             onSubmit={(event) => {
               event.preventDefault();
               setAppliedSearch(search.trim());
             }}
           >
             Search
-            <div className="flex gap-2">
+            <div className="flex w-full gap-2">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="request id, model, error…"
-                className="w-64"
+                className="min-w-0 flex-1 sm:w-64 sm:flex-none"
               />
-              <Button type="submit" variant="secondary" size="default">
+              <Button type="submit" variant="secondary" size="default" className="shrink-0">
                 <Search />
                 Apply
               </Button>
@@ -273,8 +273,8 @@ export function RequestsView() {
           )}
 
           {rows.length > 0 ? (
-            <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
-              <span>
+            <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+              <span className="break-words">
                 Showing {offset + 1}–{offset + rows.length}
                 {data?.limit ? ` · page size ${data.limit}` : ''}
               </span>
@@ -284,6 +284,7 @@ export function RequestsView() {
                   size="sm"
                   disabled={!hasPrevious}
                   onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                  className="flex-1 sm:flex-none"
                 >
                   Previous
                 </Button>
@@ -292,6 +293,7 @@ export function RequestsView() {
                   size="sm"
                   disabled={!hasNext}
                   onClick={() => setOffset(offset + PAGE_SIZE)}
+                  className="flex-1 sm:flex-none"
                 >
                   Next
                 </Button>

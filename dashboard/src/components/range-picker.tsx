@@ -48,7 +48,7 @@ export function RangePicker({ value }: { value: WindowValue }) {
     <div
       role="group"
       aria-label="Time window"
-      className="inline-flex items-center rounded-xl border border-white/[0.08] bg-[#121217] p-1 shadow-sm"
+      className="inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-white/[0.08] bg-[#121217] p-1 shadow-sm [-webkit-overflow-scrolling:touch]"
     >
       {WINDOWS.map((item) => (
         <Link
@@ -56,7 +56,7 @@ export function RangePicker({ value }: { value: WindowValue }) {
           href={hrefFor(item.value)}
           aria-current={item.value === value ? 'true' : undefined}
           className={cn(
-            'rounded-lg px-2.5 py-1 text-xs font-medium transition-all',
+            'shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition-all',
             item.value === value
               ? 'bg-white/[0.1] text-white shadow-sm ring-1 ring-white/[0.08]'
               : 'text-neutral-400 hover:bg-white/[0.04] hover:text-white',

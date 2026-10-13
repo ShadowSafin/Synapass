@@ -272,12 +272,18 @@ export function LineChart({
         )}
       </svg>
 
-      {/* Floating tooltip on hover */}
+      {/* Floating tooltip on hover. Edge-aware: near the first/last point the
+          box aligns to that edge instead of centering, so it never spills
+          outside the card on a narrow phone. Hidden on touch (no hover). */}
       {hoveredIdx != null ? (
         <div
-          className="pointer-events-none absolute -top-2 z-20 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-card px-3 py-1.5 shadow-xl"
+          className={cn(
+            'pointer-events-none absolute -top-2 z-20 hidden -translate-y-full rounded-lg border border-border bg-card px-3 py-1.5 shadow-xl sm:block',
+            hoveredIdx === 0 ? 'translate-x-0' : hoveredIdx === pointCount - 1 ? '-translate-x-full' : '-translate-x-1/2',
+          )}
           style={{
             left: `${((xAt(hoveredIdx) - PADDING_LEFT) / innerWidth) * 100}%`,
+            maxWidth: 'min(240px, calc(100% - 1rem))',
           }}
         >
           <p className="text-[10px] font-medium text-muted-foreground">{labels[hoveredIdx]}</p>

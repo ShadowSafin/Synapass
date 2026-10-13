@@ -45,14 +45,14 @@ export function TenantPicker({ value, allowAll = true }: { value: string; allowA
   const options = allowAll ? [{ id: '', name: 'All tenants' }, ...(tenants ?? [])] : (tenants ?? []);
 
   return (
-    <label className="inline-flex items-center gap-2 text-xs text-neutral-400">
+    <label className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs text-neutral-400">
       <span className="sr-only">Tenant</span>
       <select
         value={value}
         onChange={(event) => {
           window.location.assign(hrefFor(event.target.value));
         }}
-        className="h-8.5 rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-sm"
+        className="h-8.5 max-w-[calc(100vw-2rem)] truncate rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-sm sm:max-w-[220px]"
       >
         {options.map((tenant) => (
           <option key={tenant.id || 'all'} value={tenant.id}>

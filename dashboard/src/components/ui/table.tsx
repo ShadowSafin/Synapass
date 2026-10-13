@@ -5,8 +5,10 @@ import { cn } from '@/lib/utils';
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
     // The wrapper is what makes a wide table scroll on a narrow screen instead
-    // of pushing the whole layout sideways.
-    <div className="relative w-full overflow-x-auto">
+    // of pushing the whole layout sideways. Headers carry whitespace-nowrap,
+    // so a wide table keeps its intrinsic width and overflows into a scroll;
+    // a narrow table still fits without one.
+    <div className="relative w-full max-w-full overflow-x-auto [-webkit-overflow-scrolling:touch]">
       <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
     </div>
   ),

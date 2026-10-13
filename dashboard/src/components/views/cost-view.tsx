@@ -83,12 +83,12 @@ function UrlFilterSelect({
   };
 
   return (
-    <label className="inline-flex items-center gap-2 text-xs text-neutral-400">
+    <label className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs text-neutral-400">
       <span className="sr-only">{label}</span>
       <select
         value={value}
         onChange={(event) => window.location.assign(hrefFor(event.target.value))}
-        className="h-8.5 max-w-[180px] rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 shadow-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+        className="h-8.5 max-w-[calc(100vw-2rem)] truncate rounded-xl border border-white/[0.08] bg-[#121217] px-3 text-xs text-neutral-200 shadow-sm focus:outline-none focus:ring-1 focus:ring-primary/50 sm:max-w-[180px]"
       >
         <option value="">{allLabel}</option>
         {options.map((option) => (
@@ -470,7 +470,7 @@ export function CostView() {
               <EmptyState title="No trace selected" description="Pick a row on the left." />
             ) : (
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
                   <div>
                     <p className="text-muted-foreground">Actual</p>
                     <p className="text-sm font-semibold tabular-nums">
@@ -770,7 +770,7 @@ export function CostView() {
                 className="h-8 rounded-lg border border-white/[0.08] bg-[#121217] px-2 text-xs tabular-nums"
                 aria-label="Cached input price per million"
               />
-              <Button type="submit" size="sm" disabled={createPricing.isPending}>
+              <Button type="submit" size="sm" disabled={createPricing.isPending} className="col-span-2 sm:col-span-1">
                 Mint sheet
               </Button>
             </form>

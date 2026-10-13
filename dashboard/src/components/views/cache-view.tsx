@@ -74,14 +74,14 @@ export function CacheView() {
         title="Cache analytics"
         description="Exact, prefix and semantic hit rates with bypass reasons, reuse counts and latency saved. Tenant-isolated keys; flushes are audited."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input
-              className="h-8 w-44 rounded-md border border-input bg-background px-2 text-xs"
+              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs sm:w-44 sm:flex-none"
               placeholder="tenant filter (empty = all)"
               value={tenant}
               onChange={(e) => setTenant(e.target.value)}
             />
-            <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+            <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching} className="shrink-0">
               <RefreshCw className={isFetching ? 'animate-spin' : undefined} />
               Refresh
             </Button>
@@ -93,19 +93,19 @@ export function CacheView() {
         <TableSkeleton rows={3} columns={4} />
       ) : (
         <>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Hit rate" value={stats ? formatPercent(stats.hit_rate) : '—'} hint={`${formatNumber(hits)} hits / ${formatNumber(misses)} misses`} />
             <StatCard label="Exact hits" value={formatNumber(stats?.exact_hits ?? 0)} hint="byte-identical requests" />
             <StatCard label="Prefix / semantic" value={`${formatNumber(stats?.prefix_hits ?? 0)} / ${formatNumber(stats?.semantic_hits ?? 0)}`} hint="short-prefix vs embedding similarity" />
             <StatCard label="Bypasses" value={formatNumber(stats?.bypasses ?? 0)} hint="sensitive, tools, streaming, policy" />
           </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Reuse count" value={formatNumber(stats?.reuse_count ?? 0)} hint="total served-from-cache" />
             <StatCard label="Latency saved" value={formatDurationMs(stats?.latency_saved_ms ?? 0)} hint="provider time avoided" />
             <StatCard label="Cost saved" value={formatCurrency(stats?.cost_saved_usd ?? 0)} hint="billed cost avoided by reuse" />
             <StatCard label="Lookup avg" value={formatDurationMs(stats?.lookup_ms_avg ?? 0)} hint="cache lookup time" />
           </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Miss rate" value={formatPercent(missRate)} hint={`${formatNumber(misses)} misses of ${formatNumber(totalLookups)} lookups`} />
             <StatCard label="Bypass rate" value={formatPercent(bypassRate)} hint="streaming, tools, policy, sensitive" />
             <StatCard label="Invalidations" value={formatNumber(stats?.invalidations ?? 0)} hint="flushes this process" />
@@ -192,7 +192,7 @@ export function CacheView() {
           </select>
           {scope !== 'all' ? (
             <input
-              className="h-9 w-64 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-9 min-w-0 w-full flex-1 rounded-md border border-input bg-background px-3 text-sm sm:w-64 sm:flex-none"
               placeholder={scope === 'tenant' ? 'tenant id (empty = all)' : scope === 'key' ? 'exact cache key (tenant filter required)' : `${scope} name or key`}
               value={scopeTarget}
               onChange={(e) => setScopeTarget(e.target.value)}
@@ -242,15 +242,15 @@ export function CacheView() {
                 ))}
               </ul>
             )}
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
-                className="h-8 w-40 rounded-md border border-input bg-background px-2 text-xs"
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs sm:w-40 sm:flex-none"
                 placeholder="policy name"
                 value={policyName}
                 onChange={(e) => setPolicyName(e.target.value)}
               />
               <input
-                className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+                className="h-8 w-24 min-w-0 flex-none rounded-md border border-input bg-background px-2 text-xs sm:flex-none"
                 placeholder="ttl (s)"
                 value={policyTtl}
                 onChange={(e) => setPolicyTtl(e.target.value)}
@@ -310,15 +310,15 @@ export function CacheView() {
             <CardDescription>Metadata only. Bodies stay in Redis. Filter by model or provider to slice by serving context.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <input
-                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs"
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs sm:w-36 sm:flex-none"
                 placeholder="model filter"
                 value={entryModel}
                 onChange={(e) => setEntryModel(e.target.value)}
               />
               <input
-                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs"
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs sm:w-36 sm:flex-none"
                 placeholder="provider filter"
                 value={entryProvider}
                 onChange={(e) => setEntryProvider(e.target.value)}

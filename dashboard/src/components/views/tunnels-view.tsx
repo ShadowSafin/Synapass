@@ -147,7 +147,7 @@ export function TunnelsView() {
         <TableSkeleton rows={3} columns={4} />
       ) : enabled ? (
         <>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Status" value={active ? active.status : 'idle'} hint={active ? `target ${active.target}` : 'no tunnel running'} />
             <StatCard label="Public URL" value={active?.public_url ? 'live' : '—'} hint={active?.public_url ?? 'create a tunnel to mint one'} />
             <StatCard label="Reconnects" value={formatNumber(active?.reconnects ?? 0)} hint="supervisor restarts this session" />
@@ -214,7 +214,7 @@ export function TunnelsView() {
                   </select>
                   {target === 'custom' ? (
                     <input
-                      className="h-9 w-56 rounded-md border border-input bg-background px-3 text-sm"
+                      className="h-9 min-w-0 w-full flex-1 rounded-md border border-input bg-background px-3 text-sm sm:w-56 sm:flex-none"
                       placeholder="127.0.0.1:8080"
                       value={custom}
                       onChange={(e) => setCustom(e.target.value)}

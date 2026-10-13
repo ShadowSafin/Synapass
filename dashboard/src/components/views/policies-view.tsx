@@ -272,9 +272,9 @@ function PolicyCard({ policy }: { policy: RoutingPolicy }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2 text-base">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               {policy.name}
               <Badge tone={policy.enabled ? 'success' : 'neutral'} dot>
                 {policy.enabled ? 'enabled' : 'disabled'}
@@ -287,7 +287,7 @@ function PolicyCard({ policy }: { policy: RoutingPolicy }) {
             <p className="text-xs text-muted-foreground">Matches {matchParts.join(' · ')}</p>
             {feedback ? <p className="text-xs text-info">{feedback}</p> : null}
           </div>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <Button variant="ghost" size="sm" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
               <ChevronDown className={cn('transition-transform', open ? 'rotate-180' : undefined)} />
               {open ? 'Hide' : 'Details'}

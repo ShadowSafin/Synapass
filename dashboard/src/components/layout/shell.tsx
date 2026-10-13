@@ -79,7 +79,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const playground = WIDE_PATHS.has(pathname);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen overflow-x-clip bg-background">
       {/* Mobile top bar. The sidebar owns navigation on desktop; this bar only
           exists to open it where the rail does not fit. */}
       <div
@@ -101,7 +101,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <SidebarBrand compact />
       </div>
 
-      <div className="flex min-h-screen lg:min-h-screen">
+      <div className="flex min-h-screen min-w-0 lg:min-h-screen">
         {/* Desktop rail. Transparent sidebar, so the wash behind it tints the nav. */}
         <div
           className={cn(
@@ -132,7 +132,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             aria-modal="true"
             aria-label="Navigation"
             className={cn(
-              `absolute inset-y-0 left-0 w-[280px] border-r bg-card transition-transform duration-200 ease-out ${
+              `absolute inset-y-0 left-0 w-[min(280px,85vw)] border-r bg-card transition-transform duration-200 ease-out ${
                 navOpen ? 'translate-x-0' : '-translate-x-full'
               }`,
               playground ? 'border-transparent' : 'border-border',
@@ -157,19 +157,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
           <main
             className={
               WIDE_PATHS.has(pathname)
-                ? 'w-full flex-1'
-                : 'mx-auto w-full max-w-[1500px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-10'
+                ? 'w-full min-w-0 flex-1'
+                : 'mx-auto w-full min-w-0 max-w-[1500px] flex-1 overflow-x-clip px-3 py-4 sm:px-6 sm:py-8 lg:px-10'
             }
           >
             {children}
           </main>
           <footer
             className={cn(
-              'relative border-t px-6 py-3 text-center text-[11px] text-muted-foreground',
+              'relative border-t px-4 py-3 text-center text-[11px] leading-relaxed text-muted-foreground',
               playground ? 'border-transparent' : 'border-border',
               playground && BAR_WASH,
             )}

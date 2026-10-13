@@ -48,9 +48,9 @@ export function BarList({
       {rows.map((row) => {
         const width = Math.max(2, (row.value / max) * 100);
         return (
-          <li key={row.label} className="space-y-1.5">
-            <div className="flex items-baseline justify-between gap-2 text-xs">
-              <span className="truncate font-medium text-neutral-200" title={row.label}>
+          <li key={row.label} className="min-w-0 space-y-1.5">
+            <div className="flex min-w-0 items-baseline justify-between gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate font-medium text-neutral-200" title={row.label}>
                 {row.label}
               </span>
               <span className="shrink-0 tabular-nums text-neutral-400">

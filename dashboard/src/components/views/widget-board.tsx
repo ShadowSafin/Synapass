@@ -89,7 +89,7 @@ function Shell({ title, meta, children }: { title: string; meta?: React.ReactNod
 
 function Big({ children, unit }: { children: React.ReactNode; unit?: string }) {
   return (
-    <p className="font-mono text-[28px] font-medium leading-none tracking-tight tabular-nums text-foreground">
+    <p className="break-words font-mono text-[22px] font-medium leading-tight tracking-tight tabular-nums text-foreground min-[400px]:text-[28px] min-[400px]:leading-none">
       {children}
       {unit && <span className="ml-1 font-sans text-[13px] font-normal text-muted-foreground">{unit}</span>}
     </p>
@@ -291,15 +291,15 @@ function ToolsWidget() {
       <Big>{formatNumber(total)}</Big>
       <div className="mt-auto space-y-2 pt-3">
         {rows.map(([name, count], i) => (
-          <div key={name} className={cn('flex items-center gap-3 text-[13px]', i > 0 && 'text-muted-foreground')}>
-            <span className="w-[140px] shrink-0 truncate font-mono text-xs">{name}</span>
+          <div key={name} className={cn('flex min-w-0 items-center gap-2 text-[13px] min-[400px]:gap-3', i > 0 && 'text-muted-foreground')}>
+            <span className="w-[100px] shrink-0 truncate font-mono text-xs min-[400px]:w-[140px]">{name}</span>
             <span aria-hidden="true" className="block h-[3px] min-w-0 flex-1 rounded-full bg-foreground/10">
               <span
                 className={cn('block h-full rounded-full', i === 0 ? 'bg-primary' : 'bg-foreground/25')}
                 style={{ width: `${(count / max) * 100}%` }}
               />
             </span>
-            <span className="w-[56px] shrink-0 text-right font-mono tabular-nums">{formatNumber(count)}</span>
+            <span className="w-[48px] shrink-0 text-right font-mono tabular-nums min-[400px]:w-[56px]">{formatNumber(count)}</span>
           </div>
         ))}
         {rows.length === 0 && <p className="text-xs text-muted-foreground">No tool calls recorded.</p>}
