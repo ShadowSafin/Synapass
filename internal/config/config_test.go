@@ -416,6 +416,55 @@ func TestValidationAggregatesEveryProblem(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Reconciled defaults: strategy catalogue and tunnel floor
+// ---------------------------------------------------------------------------
+
+func TestAllShippedStrategiesValidate(t *testing.T) {
+	// The strategy catalogue lives in internal/domain and internal/routing;
+	// validation and the shipped example must accept every member of it.
+	// config.example.yaml documents the same five names in its
+	// routing.default_strategy comment.
+	for _, strategy := range []string{"priority", "weighted", "lowest_cost", "lowest_latency", "highest_quality"} {
+		t.Run(strategy, func(t *testing.T) {
+			cfg := deployableDefaults()
+			cfg.Routing.DefaultStrategy = strategy
+			cfg.Policies = []PolicyConfig{{
+				Name:     "test",
+				Strategy: strategy,
+				Targets:  []TargetConfig{{Model: "gpt-4o-mini"}},
+			}}
+			if err := cfg.Finalize(); err != nil {
+				t.Errorf("strategy %q must validate: %v", strategy, err)
+			}
+		})
+	}
+}
+
+func TestTunnelDefaultsToDisabledSafeFloor(t *testing.T) {
+	// Reconciled truth: code defaults tunnel.enabled to false (a hand-written
+	// config that omits the key creates nothing), while every shipped template
+	// (config.example.yaml, compose, desktop/native installers) sets it true
+	// explicitly. Pin the floor so a future default change is deliberate.
+	cfg := Default()
+	if cfg.Tunnel.Enabled {
+		t.Error("Default().Tunnel.Enabled must be false; shipped templates opt in explicitly")
+	}
+}
+
+func TestTunnelEnabledViaEnvironment(t *testing.T) {
+	// The compose/docker path enables tunnels through the environment, which
+	// must override the disabled floor without a config file change.
+	t.Setenv("SYNAPASS_TUNNEL_ENABLED", "true")
+	cfg := deployableDefaults()
+	if err := cfg.applyEnv(); err != nil {
+		t.Fatalf("applyEnv: %v", err)
+	}
+	if !cfg.Tunnel.Enabled {
+		t.Error("SYNAPASS_TUNNEL_ENABLED=true must enable tunnels over the disabled default")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Secret handling
 // ---------------------------------------------------------------------------
 

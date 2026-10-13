@@ -40,7 +40,7 @@ reproducible when replaying a historical request.
 | `weighted` | Deterministically by weight, seeded from the request id | You want load spread across peers you trust equally. |
 | `lowest_cost` | The cheapest projected cost per request | Cost is the constraint. |
 | `lowest_latency` | The lowest observed or prior latency | Interactive latency is what matters. |
-| `highest_quality` | The highest observed quality score | Answer quality dominates. |
+| `highest_quality` | The highest operator-assigned quality tier | Answer quality dominates. |
 
 `weighted` is deterministic **for a given request id**. A retry inside one
 request makes the same choice as the original attempt rather than re-rolling, and

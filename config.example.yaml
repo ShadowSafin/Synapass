@@ -148,7 +148,7 @@ auth:
   # allow_anonymous_tenant: ""
 
 routing:
-  default_strategy: priority # priority | weighted | lowest_cost | lowest_latency
+  default_strategy: priority # priority | weighted | lowest_cost | lowest_latency | highest_quality
   default_max_attempts: 2
   default_retry:
     max_attempts: 2
@@ -234,6 +234,10 @@ tools:
 # from the dashboard (/tunnels) or POST /admin/v1/tunnels/create. Every request
 # through a tunnel still passes Synapass auth, policy and rate limits. Set
 # SYNAPASS_TUNNEL_ENABLED=false to remove the capability entirely.
+#
+# The shipped value below (true) is an explicit stock-install choice. A
+# hand-written config that omits the key defaults to false (the safe floor in
+# code): nothing is creatable until the flag is set deliberately.
 tunnel:
   enabled: true # or SYNAPASS_TUNNEL_ENABLED=false to remove the capability
   binary: cloudflared # absolute path also works; or SYNAPASS_TUNNEL_BINARY

@@ -1,0 +1,139 @@
+name: CI
+
+# Unit / build safety nets only. The live-stack smoke check
+# (scripts/smoke.sh / smoke.ps1) needs a running stack, so it is
+# NOT part of this pipeline; run it locally via `make smoke`, or
+# trigger it manually with workflow_dispatch + run_smoke=true.
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_smoke:
+        description: "Run the live-stack smoke check (needs the stack up)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go (fmt, vet, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l ./internal ./cmd)"
+          if [ -n "$files" ]; then
+            echo "gofmt: unformatted files:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  workers:
+    name: workers (ruff, unittest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: workers/requirements-dev.txt
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      # ruff is configured in workers/pyproject.toml ([tool.ruff]); if it ever
+      # goes away, fall back to a stdlib syntax check so the job still guards.
+      - name: Lint (ruff, else compileall)
+        run: |
+          if [ -f pyproject.toml ] && grep -q '\[tool.ruff\]' pyproject.toml; then
+            ruff check .
+            ruff format --check .
+          else
+            python -m compileall -q synapass_workers tests
+          fi
+
+      - name: Test
+        run: python -m unittest discover -s tests -t . -v
+
+  dashboard:
+    name: dashboard (typecheck, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  compose:
+    name: compose config validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker compose config
+        run: docker compose config > /dev/null
+
+  smoke:
+    name: smoke (live stack, manual only)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run smoke check against live stack
+        run: bash scripts/smoke.sh

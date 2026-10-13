@@ -9,6 +9,7 @@
 Routing · failover · caching · policy · budgets · full request lineage
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/ShadowSafin/Synapass/actions/workflows/ci.yml/badge.svg)](https://github.com/ShadowSafin/Synapass/actions/workflows/ci.yml)
 [![Go 1.27](https://img.shields.io/badge/go-1.27-00ADD8.svg)](go.mod)
 [![Docs](https://img.shields.io/badge/docs-documentation%2F-informational.svg)](documentation/README.md)
 
