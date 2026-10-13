@@ -21,6 +21,23 @@ func (s *Server) priceReplayUsage(ctx context.Context, tenantID, providerName, m
 	return bd.TotalUSD
 }
 
+// priceTraceAttempt prices one trace attempt for trace_attempts.cost_usd
+// through the same versioned-sheet resolution live traffic uses (tenant >
+// model > provider > global, registry fallback). Wired into the ClickHouse
+// writer at server construction; it degrades to the attempt target's registry
+// rates exactly as the request path does, so per-attempt costs foot with the
+// cost views instead of a second price book.
+func (s *Server) priceTraceAttempt(ctx context.Context, tenantID string, target domain.RouteTarget, usage domain.TokenUsage) float64 {
+	usage = usage.Normalize()
+	provider := target.ProviderName
+	if provider == "" {
+		provider = target.ProviderID
+	}
+	price := s.resolvePrice(ctx, tenantID, provider, target.Model, target)
+	bd := cost.Compute(usage, price, []cost.AttemptUsage{{Label: "attempt", Usage: usage, BillBaseFee: true}})
+	return bd.TotalUSD
+}
+
 // Phase 2 service contracts. Defined here (consumer side) so the api package
 // does not import classifier/shaping/cache/scoring/guardrails/replay
 // implementations directly; wiring adapters satisfy these.

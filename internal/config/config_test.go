@@ -62,6 +62,27 @@ func TestShippedDefaultsFailFastWithoutABootstrapAdminKey(t *testing.T) {
 	}
 }
 
+func TestPlaceholderAdminKeyRejectedInProduction(t *testing.T) {
+	// The shipped placeholder is non-empty, so the empty-key check above does
+	// not catch it. Production must refuse it explicitly; an explicit local
+	// evaluation (development) may still use it.
+	cfg := Default()
+	cfg.Telemetry.OTLPEndpoint = "localhost:4318"
+	cfg.App.Environment = "production"
+	cfg.Auth.AdminKey = PlaceholderAdminKey
+
+	if err := cfg.Finalize(); err == nil {
+		t.Fatal("the shipped placeholder admin key must be rejected in production")
+	} else if !strings.Contains(err.Error(), "placeholder") {
+		t.Errorf("error %q should name the placeholder", err.Error())
+	}
+
+	cfg.App.Environment = "development"
+	if err := cfg.Finalize(); err != nil {
+		t.Fatalf("an explicit local evaluation may use the placeholder: %v", err)
+	}
+}
+
 func TestDefaultConfigFinalizesAndValidates(t *testing.T) {
 	cfg := deployableDefaults()
 	if err := cfg.Finalize(); err != nil {

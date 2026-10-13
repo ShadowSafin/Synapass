@@ -32,7 +32,8 @@ type Options struct {
 	SemanticEnabled bool
 	// PrefixEnabled gates the prefix tier.
 	PrefixEnabled bool
-	// MaxSemanticEntries bounds the in-process semantic index.
+	// MaxSemanticEntries bounds the semantic similarity index (local search
+	// entries; durable sidecars in the store expire by TTL).
 	MaxSemanticEntries int
 	// BypassTools skips tool-carrying requests (default true).
 	BypassTools bool
@@ -65,9 +66,10 @@ type Cache struct {
 	opts  Options
 
 	mu sync.Mutex
-	// memIndex tracks semantic entries for similarity search when the store
-	// cannot enumerate keys (Redis SCAN is expensive on the hot path, so the
-	// gateway keeps a small in-process embedding index).
+	// memIndex is the local search front for similarity lookup. Every entry
+	// also has a durable sidecar in the store (sidx:<nsSem>, same TTL as
+	// the body) so Warmup can rebuild this map after a restart; Redis SCAN
+	// stays off the hot path and the gateway searches memory instead.
 	memIndex map[string]semanticEntry
 	// keyIndex maps a request's primary cache key to every store key
 	// written for it (exact + prefix + semantic tiers), so a key-scope
@@ -299,7 +301,7 @@ func (c *Cache) StoreResponseWithMeta(ctx context.Context, in KeyInput, body []b
 		meta.StoredAt = now
 	}
 	// The effective TTL honors a per-request override (from a scoped cache
-	// policy): the Redis TTL and the in-process expiry both follow the
+	// policy): the Redis TTL and the local expiry both follow the
 	// envelope's ExpiresAt when it is sooner than the global default, so
 	// the dashboard TTL and the real eviction agree.
 	ttl := c.opts.TTL
@@ -382,6 +384,21 @@ func (c *Cache) StoreResponseWithMeta(ctx context.Context, in KeyInput, body []b
 		nsSem := namespaced(in.TenantID, semKey)
 		_ = c.set(ctx, nsSem, envelope, ttl)
 		written = append(written, nsSem)
+		// Durable sidecar for restart recovery: the embedding plus the
+		// serving context Warmup needs to rebuild the search index. It
+		// shares the body's TTL so the two expire together, and it joins
+		// the reverse index so a key-scope flush evicts it with the body.
+		// Best-effort like every store write: losing it only costs a
+		// future warmup entry, never the current request.
+		idxKey := semanticIndexKey(nsSem)
+		if rec, err := json.Marshal(semanticRecord{
+			NSKey: nsSem, Key: semKey, Tenant: in.TenantID,
+			Embedding: emb, Input: in,
+			StoredAt: now, ExpiresAt: now.Add(ttl),
+		}); err == nil {
+			_ = c.set(ctx, idxKey, rec, ttl)
+		}
+		written = append(written, idxKey)
 		if primary == "" {
 			primary = semKey
 		}
@@ -488,10 +505,12 @@ func (c *Cache) semanticSearch(in KeyInput, emb map[string]float64) (string, []b
 	return bestKey, bestBody, best, bestMeta
 }
 
-// evictSemanticLocked bounds the in-process semantic index. Expired entries
-// go first; when the index is still over budget (high-traffic tenants with
-// long TTLs), the oldest entries are evicted down to 90% of the cap so one
-// insert does not trigger an eviction on every subsequent insert.
+// evictSemanticLocked bounds the local semantic search index. Expired
+// entries go first; when the index is still over budget (high-traffic
+// tenants with long TTLs), the oldest entries are evicted down to 90% of
+// the cap so one insert does not trigger an eviction on every subsequent
+// insert. (Durable sidecars in the store are left to expire by TTL;
+// Warmup re-bounds on rebuild.)
 // The caller must hold c.mu.
 func (c *Cache) evictSemanticLocked() {
 	max := c.opts.MaxSemanticEntries

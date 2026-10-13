@@ -294,3 +294,191 @@ func TestRunnerProviderErrorIsPartialSuccess(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+type fakeRefs struct {
+	refs map[string]string
+	err  error
+}
+
+func (f *fakeRefs) GetReference(_ context.Context, _, requestID string) (string, bool, error) {
+	if f == nil {
+		return "", false, nil
+	}
+	if f.err != nil {
+		return "", false, f.err
+	}
+	ref, ok := f.refs[requestID]
+	return ref, ok, nil
+}
+
+type fakePublisher struct {
+	subjects []string
+	payloads []any
+}
+
+func (f *fakePublisher) PublishJSON(subject string, value any) {
+	f.subjects = append(f.subjects, subject)
+	f.payloads = append(f.payloads, value)
+}
+
+type errScorer struct{ err error }
+
+func (e errScorer) Score(_ context.Context, _, _ string) (float64, map[string]float64, error) {
+	return 0, nil, e.err
+}
+
+func TestRunnerScoresSuccessfulResults(t *testing.T) {
+	store := newFakeStore()
+	job := &domain.ReplayJob{ID: "job1", Status: "queued", RequestIDs: []string{"req_1"}, MaxRequests: 10}
+	store.jobs[job.ID] = job
+	adapter := &fakeAdapter{name: "bynara", enabled: true, output: "hello",
+		usage: domain.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}
+	r := NewRunner(RunnerDeps{
+		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "bynara", RequestedModel: "flash", RoutedModel: "flash"}}},
+		Store:    store,
+		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"bynara": adapter}},
+		Pricer:   stubPricer,
+		Scorer:   EvalScorer{},
+		References: &fakeRefs{refs: map[string]string{
+			"req_1": "hello",
+		}},
+	})
+	run, err := r.Run(context.Background(), "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error %q)", run.Status, run.Error)
+	}
+	if len(store.results) != 1 {
+		t.Fatalf("results = %d, want 1", len(store.results))
+	}
+	res := store.results[0]
+	// Exact-match output: the Newton sqrt in the trigram cosine costs an
+	// epsilon, so compare approximately.
+	if diff := 1 - res.Score; diff < 0 || diff > 1e-9 {
+		t.Errorf("score = %v, want ~1 for an exact-match output", res.Score)
+	}
+	if res.Metrics["exact_match"] != 1 || res.Metrics["token_f1"] != 1 || res.Metrics["jaccard"] != 1 {
+		t.Errorf("exact/token/jaccard metrics = %v, want all 1", res.Metrics)
+	}
+	if diff := 1 - res.Metrics["char_ngram"]; diff < 0 || diff > 1e-9 {
+		t.Errorf("char_ngram metric = %v, want ~1", res.Metrics["char_ngram"])
+	}
+	// Usage metrics survive alongside the similarity breakdown.
+	if res.Metrics["total_tokens"] != 15 {
+		t.Errorf("total_tokens metric = %v, want 15", res.Metrics["total_tokens"])
+	}
+}
+
+func TestRunnerScoringWithoutReferenceStillFillsMetrics(t *testing.T) {
+	store := newFakeStore()
+	job := &domain.ReplayJob{ID: "job1", Status: "queued", RequestIDs: []string{"req_1"}, MaxRequests: 10}
+	store.jobs[job.ID] = job
+	adapter := &fakeAdapter{name: "a", enabled: true, output: "hello",
+		usage: domain.TokenUsage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}
+	r := NewRunner(RunnerDeps{
+		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Store:    store,
+		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
+	})
+	run, err := r.Run(context.Background(), "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "completed" {
+		t.Fatalf("status = %q, want completed", run.Status)
+	}
+	res := store.results[0]
+	// No golden reference exists, so similarity is a computed zero -- but the
+	// breakdown must be present to prove the scorer ran.
+	if res.Metrics == nil {
+		t.Fatal("metrics are nil; the scorer did not run")
+	}
+	for _, k := range []string{"exact_match", "token_f1", "jaccard", "char_ngram"} {
+		v, ok := res.Metrics[k]
+		if !ok {
+			t.Errorf("metric %q is missing", k)
+			continue
+		}
+		if v != 0 {
+			t.Errorf("metric %q = %v, want computed 0", k, v)
+		}
+	}
+	if res.Metrics["prompt_tokens"] != 3 {
+		t.Errorf("prompt_tokens metric = %v, want 3", res.Metrics["prompt_tokens"])
+	}
+}
+
+func TestRunnerScorerErrorDegradesGracefully(t *testing.T) {
+	store := newFakeStore()
+	job := &domain.ReplayJob{ID: "job1", Status: "queued", RequestIDs: []string{"req_1"}, MaxRequests: 10}
+	store.jobs[job.ID] = job
+	adapter := &fakeAdapter{name: "a", enabled: true, output: "ok",
+		usage: domain.TokenUsage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}
+	r := NewRunner(RunnerDeps{
+		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Store:    store,
+		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
+		Scorer:   errScorer{err: errors.New("scorer down")},
+		References: &fakeRefs{refs: map[string]string{
+			"req_1": "ok",
+		}},
+	})
+	run, err := r.Run(context.Background(), "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A scorer outage must not lose the provider output or fail the job.
+	if run.Status != "completed" {
+		t.Fatalf("status = %q, want completed", run.Status)
+	}
+	if len(store.results) != 1 {
+		t.Fatalf("results = %d, want 1", len(store.results))
+	}
+	res := store.results[0]
+	if res.Score != 0 {
+		t.Errorf("score = %v, want degraded 0", res.Score)
+	}
+	if res.Metrics["total_tokens"] != 2 {
+		t.Errorf("total_tokens metric = %v, want 2 (usage preserved)", res.Metrics["total_tokens"])
+	}
+	if res.OutputPreview != "ok" {
+		t.Errorf("preview = %q, want the provider output", res.OutputPreview)
+	}
+}
+
+func TestRunnerPublishesCompletionEvent(t *testing.T) {
+	store := newFakeStore()
+	job := &domain.ReplayJob{ID: "job1", TenantID: "t1", Status: "queued", RequestIDs: []string{"req_1"}, MaxRequests: 10}
+	store.jobs[job.ID] = job
+	adapter := &fakeAdapter{name: "a", enabled: true, output: "ok"}
+	pub := &fakePublisher{}
+	r := NewRunner(RunnerDeps{
+		Payloads:  &fakePayloads{entries: map[string]*domain.RequestPayload{"req_1": testPayload()}},
+		Logs:      &fakeLogs{entries: map[string]*domain.RequestLog{"req_1": {RequestID: "req_1", Provider: "a", RequestedModel: "m"}}},
+		Store:    store,
+		Adapters: &fakeAdapters{byName: map[string]*fakeAdapter{"a": adapter}},
+		Events:   pub,
+	})
+	run, err := r.Run(context.Background(), "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.subjects) != 1 || pub.subjects[0] != SubjectReplayCompleted {
+		t.Fatalf("published subjects = %v, want one %q event", pub.subjects, SubjectReplayCompleted)
+	}
+	evt, ok := pub.payloads[0].(CompletionEvent)
+	if !ok {
+		t.Fatalf("payload type = %T, want CompletionEvent", pub.payloads[0])
+	}
+	if evt.JobID != "job1" || evt.RunID != run.ID || evt.TenantID != "t1" {
+		t.Errorf("event identity = %+v, want job1/%s/t1", evt, run.ID)
+	}
+	if evt.Status != "completed" || evt.Succeeded != 1 || evt.Total != 1 {
+		t.Errorf("event = %+v, want completed 1/1", evt)
+	}
+}

@@ -44,6 +44,8 @@ empty directory to a working inference call in about five minutes.
 | [Analytics](analytics.md) | Where the report's numbers come from, and their limits |
 | [Playground](playground.md) | How the endpoint testing console runs a real request |
 | [Observability](observability.md) | Metrics, traces, logs and dashboards |
+| [Self-hosting: HA scope](self-hosting.md) | Single-node guarantees, resource limits, what HA would require |
+| [Backup and restore](backup.md) | What gets backed up, procedures, scheduling |
 | [Troubleshooting](troubleshooting.md) | Something is broken and you need the cause |
 | [FAQ](faq.md) | A short answer to a common question |
 | [Changelog](changelog.md) | What each delivery phase added |

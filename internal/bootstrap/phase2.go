@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/shadowsafin/synapass/internal/cache"
@@ -118,7 +120,7 @@ func (r redisCacheStore) DeletePrefix(ctx context.Context, prefix string) (int, 
 	// Map cache prefixes to the response namespace. Bare kind prefixes and
 	// tenant namespaces all live under "response:".
 	switch prefix {
-	case "exact:", "prefix:", "semantic:", "tenant:":
+	case "exact:", "prefix:", "semantic:", "sidx:", "tenant:":
 		return r.redis.DeletePrefix(ctx, "response:"+prefix)
 	default:
 		if len(prefix) >= 9 && prefix[:9] == "response:" {
@@ -126,6 +128,45 @@ func (r redisCacheStore) DeletePrefix(ctx context.Context, prefix string) (int, 
 		}
 		return r.redis.DeletePrefix(ctx, prefix)
 	}
+}
+
+// Scan enumerates logical cache keys for index rebuilds. The cache asks for
+// its own logical patterns ("sidx:*"); the response namespace mapping is
+// applied here so the cache never learns the physical layout.
+func (r redisCacheStore) Scan(ctx context.Context, pattern string) ([]string, error) {
+	if r.redis == nil {
+		return nil, nil
+	}
+	full := pattern
+	if !strings.HasPrefix(full, "response:") {
+		full = "response:" + full
+	}
+	keys, err := r.redis.Scan(ctx, full)
+	if err != nil {
+		return nil, err
+	}
+	out := keys[:0]
+	for _, k := range keys {
+		out = append(out, strings.TrimPrefix(k, "response:"))
+	}
+	return out, nil
+}
+
+// WarmupCacheAsync rebuilds the response cache's semantic similarity index
+// from Redis in the background. It never blocks the caller and never fails
+// startup: a Redis outage or an empty store just leaves a cold index that
+// repopulates from new stores.
+func WarmupCacheAsync(ctx context.Context, c *cache.Cache, logger *slog.Logger) {
+	if c == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.StartWarmup(ctx, logger)
 }
 
 // ScoreAdapter exposes scoring.Engine as routing.ScoreProvider + api.ScoringService.

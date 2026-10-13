@@ -174,8 +174,12 @@ responses, flushes the telemetry buffer, then exits. Compose gives it
 ### Secrets
 
 `SYNAPASS_ADMIN_KEY` is not optional in production: with `admin.require_scope: true`,
-validation refuses to start without it. That is deliberate — a production install
-that cannot be administered is a worse outcome than one that refuses to boot.
+validation refuses to start without it — and refuses the shipped placeholder
+(`syn_admin_change_me_in_production_000000`) as well. That is deliberate — a
+production install that cannot be administered is a worse outcome than one that
+refuses to boot. The only bypass is an explicit throwaway evaluation
+(`SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true`), which warns loudly and must
+never be exposed.
 
 ```bash
 openssl rand -hex 24
@@ -227,4 +231,4 @@ entirely.
 
 ---
 
-Related: [Getting started](../getting-started.md) · [Installation: native](native.md) · [Cloudflare tunnel](cloudflare-tunnel.md) · [Troubleshooting](../troubleshooting.md) · [Back to README](../../README.md)
+Related: [Getting started](../getting-started.md) · [Installation: native](native.md) · [Cloudflare tunnel](cloudflare-tunnel.md) · [Self-hosting: HA scope](../self-hosting.md) · [Backup and restore](../backup.md) · [Troubleshooting](../troubleshooting.md) · [Back to README](../../README.md)

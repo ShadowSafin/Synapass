@@ -213,6 +213,11 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 
 	// ---- Phase 2 intelligence services ----
 	phase2 := bootstrap.BuildPhase2(cfg, app.redis)
+	// Rebuild the semantic similarity index from its durable Redis sidecars
+	// so a restart does not cold-start semantic reuse. Non-blocking and
+	// never fatal: a cold index only costs misses until new stores refill
+	// it.
+	bootstrap.WarmupCacheAsync(context.Background(), phase2.Cache, logger)
 	// Attach score/guardrail hooks to the engine so routing is score-informed
 	// and kill-switch aware. Nil-safe: hooks no-op when services are disabled.
 	engine := routing.NewEngine(cacheCatalogue, app.policies, app.health,

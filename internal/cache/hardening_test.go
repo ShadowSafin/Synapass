@@ -39,7 +39,7 @@ func newRedisLikeStore() *redisLikeStore {
 
 func mapPrefix(prefix string) string {
 	switch prefix {
-	case "exact:", "prefix:", "semantic:", "tenant:":
+	case "exact:", "prefix:", "semantic:", "sidx:", "tenant:":
 		return "response:" + prefix
 	default:
 		return prefix

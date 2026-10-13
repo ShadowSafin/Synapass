@@ -55,24 +55,34 @@ type Pricer func(ctx context.Context, tenantID, providerName, modelName string, 
 // panic recovery). Execution calls provider adapters directly rather than
 // looping back through HTTP: replay traffic must not bill, rate-limit, or
 // policy-route like production traffic, and it must not require a tenant key.
+// Every successful output is scored with the deterministic eval scorers, and a
+// completion event is published best-effort for workers and the dashboard.
 type Runner struct {
 	payloads PayloadSource
 	logs     LogLookup
 	store    Store
 	adapters AdapterResolver
 	pricer   Pricer
+	scorer   Scorer
+	refs     ReferenceSource
+	events   Publisher
 	logger   *slog.Logger
 }
 
 // RunnerDeps wires a Runner. Logs and Store are required; adapters may be nil
-// only in tests that never reach execution.
+// only in tests that never reach execution. Scorer defaults to the eval
+// engine, References defaults to no golden reference, and Events defaults to
+// no publish; all three are nil-safe.
 type RunnerDeps struct {
-	Payloads  PayloadSource
-	Logs      LogLookup
-	Store     Store
-	Adapters  AdapterResolver
-	Pricer    Pricer
-	Logger    *slog.Logger
+	Payloads   PayloadSource
+	Logs       LogLookup
+	Store      Store
+	Adapters   AdapterResolver
+	Pricer     Pricer
+	Scorer     Scorer
+	References ReferenceSource
+	Events     Publisher
+	Logger     *slog.Logger
 }
 
 // NewRunner creates a Runner.
@@ -87,6 +97,9 @@ func NewRunner(deps RunnerDeps) *Runner {
 		store:    deps.Store,
 		adapters: deps.Adapters,
 		pricer:   deps.Pricer,
+		scorer:   deps.Scorer,
+		refs:     deps.References,
+		events:   deps.Events,
 		logger:   logger,
 	}
 }
@@ -191,8 +204,9 @@ func (r *Runner) Run(ctx context.Context, jobID string) (*domain.EvaluationRun, 
 			r.logger.Warn("replay payload lookup failed; recording as failed",
 				"job_id", job.ID, "request_id", id, "error", perr)
 		}
+		reference := lookupReference(ctx, r.refs, job.Dataset, id)
 		for _, tgt := range targets {
-			res := r.execute(ctx, run.ID, job.TenantID, id, payload, tgt)
+			res := r.execute(ctx, run.ID, job.TenantID, id, payload, reference, tgt)
 			if res.execErr != nil {
 				if firstErr == nil {
 					firstErr = res.execErr
@@ -239,6 +253,7 @@ func (r *Runner) Run(ctx context.Context, jobID string) (*domain.EvaluationRun, 
 	} else {
 		markJob("completed", "")
 	}
+	publishCompletion(r.events, job, run, succeeded)
 	return run, nil
 }
 
@@ -290,8 +305,12 @@ type execution struct {
 	execErr error
 }
 
-// execute replays one prompt against one target through the live adapter.
-func (r *Runner) execute(ctx context.Context, evaluationID, tenantID, id string, payload *domain.RequestPayload, tgt domain.RouteTarget) execution {
+// execute replays one prompt against one target through the live adapter,
+// scoring the output against the request's golden reference (empty when none
+// is known). Executions that fail before producing output are stored unscored:
+// scoring an error string would manufacture a quality measurement out of a
+// zero.
+func (r *Runner) execute(ctx context.Context, evaluationID, tenantID, id string, payload *domain.RequestPayload, reference string, tgt domain.RouteTarget) execution {
 	fail := func(err error, preview string) execution {
 		if preview == "" {
 			preview = "error: " + err.Error()
@@ -355,18 +374,22 @@ func (r *Runner) execute(ctx context.Context, evaluationID, tenantID, id string,
 	if r.pricer != nil {
 		costUSD = r.pricer(ctx, tenantID, tgt.ProviderName, tgt.Model, usage)
 	}
-	res := &domain.EvaluationResult{
-		ID: domain.NewID(), EvaluationID: evaluationID, RequestID: id,
-		Provider: tgt.ProviderName, Model: tgt.Model,
-		LatencyMS:     latency,
-		CostUSD:       costUSD,
-		OutputPreview: truncate(resp.Content(), 500),
-		Metrics: map[string]float64{
+	content := resp.Content()
+	score, metrics := scoreOutput(ctx, r.scorer, r.logger, reference, content,
+		map[string]float64{
 			"prompt_tokens":     float64(usage.PromptTokens),
 			"completion_tokens": float64(usage.CompletionTokens),
 			"total_tokens":      float64(usage.TotalTokens),
-		},
-		CreatedAt: domain.Now(),
+		})
+	res := &domain.EvaluationResult{
+		ID: domain.NewID(), EvaluationID: evaluationID, RequestID: id,
+		Provider: tgt.ProviderName, Model: tgt.Model,
+		Score:           score,
+		LatencyMS:       latency,
+		CostUSD:         costUSD,
+		OutputPreview:   truncate(content, 500),
+		Metrics:         metrics,
+		CreatedAt:       domain.Now(),
 	}
 	return execution{result: res}
 }

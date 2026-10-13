@@ -2,13 +2,16 @@
 // providers for offline comparison.
 //
 // Replay never touches live traffic: it reads request logs, rebuilds the
-// original prompt, and fans out execution through NATS workers. Results flow
-// back into evaluation runs.
+// original prompt preferring the captured payload messages, executes through
+// the in-process Runner against the live provider adapters, scores every
+// successful output with the deterministic eval scorers, and publishes a
+// completion event for workers and the dashboard to observe.
 package replay
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -45,16 +48,50 @@ type Store interface {
 	ListResults(ctx context.Context, evaluationID string, limit int) ([]domain.EvaluationResult, error)
 }
 
-// Service orchestrates replay jobs.
+// Service orchestrates replay jobs. It is the legacy synchronous path (a stub
+// Executor, retained for tests and embedders); production traffic runs
+// through Runner, which executes against the live provider adapters.
 type Service struct {
 	requests RequestSource
 	exec     Executor
 	store    Store
+	payloads PayloadSource
+	scorer   Scorer
+	refs     ReferenceSource
+	events   Publisher
+	logger   *slog.Logger
+}
+
+// ServiceDeps wires a Service. Only Requests, Exec and Store are required;
+// Payloads, Scorer, References and Events are optional and degrade gracefully
+// (stub fallback, default eval scorer, empty reference, no publish).
+type ServiceDeps struct {
+	Requests   RequestSource
+	Exec       Executor
+	Store      Store
+	Payloads   PayloadSource
+	Scorer     Scorer
+	References ReferenceSource
+	Events     Publisher
+	Logger     *slog.Logger
 }
 
 // New creates a service.
 func New(requests RequestSource, exec Executor, store Store) *Service {
-	return &Service{requests: requests, exec: exec, store: store}
+	return NewWithDeps(ServiceDeps{Requests: requests, Exec: exec, Store: store})
+}
+
+// NewWithDeps creates a service with scoring, payload and event wiring.
+func NewWithDeps(deps ServiceDeps) *Service {
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{
+		requests: deps.Requests, exec: deps.Exec, store: deps.Store,
+		payloads: deps.Payloads, scorer: deps.Scorer, refs: deps.References,
+		events: deps.Events, logger: logger,
+	}
 }
 
 // CreateJob validates and persists a job.
@@ -87,7 +124,11 @@ func (s *Service) CreateJob(ctx context.Context, job *domain.ReplayJob) (*domain
 	return job, nil
 }
 
-// Run executes a job synchronously (workers call this async via NATS).
+// Run executes a job synchronously, scoring every successful output with the
+// deterministic eval scorers and publishing a completion event. Failed
+// executions are stored unscored: scoring an error string against a reference
+// would produce a number that looks like a quality measurement and is really
+// a zero.
 func (s *Service) Run(ctx context.Context, jobID string) (*domain.EvaluationRun, error) {
 	if s.store == nil {
 		return nil, domain.NewError(domain.ErrCodeInternal, "replay store is unavailable")
@@ -118,6 +159,7 @@ func (s *Service) Run(ctx context.Context, jobID string) (*domain.EvaluationRun,
 
 	var mu sync.Mutex
 	results := 0
+	succeeded := 0
 	var firstErr error
 
 	for _, id := range ids {
@@ -125,7 +167,14 @@ func (s *Service) Run(ctx context.Context, jobID string) (*domain.EvaluationRun,
 		if err != nil || entry == nil {
 			continue
 		}
-		req := rebuildRequest(entry)
+		var payload *domain.RequestPayload
+		if s.payloads != nil {
+			// A lookup failure degrades to the stub reconstruction below,
+			// never to a dropped request.
+			payload, _ = s.payloads.Get(ctx, id)
+		}
+		req := rebuildRequest(entry, payload)
+		reference := lookupReference(ctx, s.refs, job.Dataset, id)
 		for _, tgt := range targets {
 			output, lat, cost, execErr := s.exec(ctx, req, tgt)
 			res := &domain.EvaluationResult{
@@ -143,8 +192,10 @@ func (s *Service) Run(ctx context.Context, jobID string) (*domain.EvaluationRun,
 				}
 				mu.Unlock()
 			} else {
-				// Score is filled by the eval stage; store a placeholder.
-				res.Score = 0
+				res.Score, res.Metrics = scoreOutput(ctx, s.scorer, s.logger, reference, output, nil)
+				mu.Lock()
+				succeeded++
+				mu.Unlock()
 			}
 			_ = s.store.AddResult(ctx, res)
 			mu.Lock()
@@ -169,6 +220,7 @@ func (s *Service) Run(ctx context.Context, jobID string) (*domain.EvaluationRun,
 	job.FinishedAt = run.FinishedAt
 	job.UpdatedAt = domain.Now()
 	_ = s.store.UpdateJob(ctx, job)
+	publishCompletion(s.events, job, run, succeeded)
 	return run, nil
 }
 
@@ -192,14 +244,16 @@ func buildTargets(job *domain.ReplayJob) []domain.RouteTarget {
 	return out
 }
 
-func rebuildRequest(entry *domain.RequestLog) domain.ChatCompletionRequest {
-	// The decision record carries the shaped prompt when available; fall back
-	// to a minimal reconstruction so replay never fails for lack of detail.
-	if entry.Decision != nil && entry.Decision.Chosen.Model != "" {
-		return domain.ChatCompletionRequest{
-			Model:    entry.RequestedModel,
-			Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: domain.NewTextContent("[replay:" + entry.RequestID + "]")}},
+func rebuildRequest(entry *domain.RequestLog, payload *domain.RequestPayload) domain.ChatCompletionRequest {
+	// The captured payload carries the real prompt when available; prefer it
+	// so replay re-executes what actually served. Fall back to a minimal
+	// reconstruction so replay never fails for lack of detail.
+	if payload != nil && len(payload.Messages) > 0 {
+		model := entry.RequestedModel
+		if model == "" {
+			model = payload.Model
 		}
+		return domain.ChatCompletionRequest{Model: model, Messages: payload.Messages}
 	}
 	return domain.ChatCompletionRequest{
 		Model:    entry.RequestedModel,

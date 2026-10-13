@@ -347,6 +347,27 @@ func (c *Config) validateAdmin(v *ValidationError) {
 	if c.Admin.Enabled && c.Admin.RequireScope && c.Auth.AdminKey == "" && c.IsProduction() {
 		v.add("admin.require_scope is true but no bootstrap admin key is configured (set SYNAPASS_ADMIN_KEY)")
 	}
+	// The shipped placeholder (.env.example, compose defaults) is non-empty on
+	// purpose so an unmodified copy boots far enough to fail loudly -- but it
+	// must never administer a production install. Outside production (an
+	// explicit local evaluation) it is tolerated.
+	if c.IsProduction() && isPlaceholderAdminKey(c.Auth.AdminKey) {
+		v.add("auth admin key is the shipped placeholder; generate a real one (openssl rand -hex 24) and set SYNAPASS_ADMIN_KEY")
+	}
+}
+
+// PlaceholderAdminKey is the value shipped in .env.example and the compose
+// defaults. Kept in one place so validation, tests and docs cannot drift.
+const PlaceholderAdminKey = "syn_admin_change_me_in_production_000000"
+
+// isPlaceholderAdminKey reports whether a key is a shipped placeholder rather
+// than a real credential. The exact constant plus the family prefix are both
+// rejected so a hand-edited variant ("..._000001") does not slip through.
+func isPlaceholderAdminKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	return key == PlaceholderAdminKey || strings.HasPrefix(key, "syn_admin_change_me")
 }
 
 // validateCatalog checks the declarative provider/model/policy catalogue. Cross

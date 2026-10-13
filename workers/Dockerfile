@@ -54,6 +54,12 @@ USER synapass
 # stops serving it, which is the only externally visible symptom this process has.
 EXPOSE 9101
 
+# urllib from the standard library, because the slim image ships no curl/wget.
+# Compose also declares this probe so `docker compose ps` reports health even
+# when the image is overridden.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=4)"
+
 # Tini-style signal forwarding is unnecessary here because the entrypoint is the
 # interpreter itself (PID 1 is python), but exec form is still used so SIGTERM
 # reaches it directly.

@@ -50,7 +50,7 @@ func (c *Cache) Invalidate(ctx context.Context, scope InvalidateScope) (int, err
 	switch scope.Scope {
 	case "", "all":
 		if c.store != nil {
-			for _, p := range []string{"tenant:", "exact:", "prefix:", "semantic:"} {
+			for _, p := range []string{"tenant:", "exact:", "prefix:", "semantic:", "sidx:"} {
 				n, err := c.store.DeletePrefix(ctx, p)
 				removed += n
 				if err != nil {
@@ -71,6 +71,13 @@ func (c *Cache) Invalidate(ctx context.Context, scope InvalidateScope) (int, err
 		}
 		if c.store != nil {
 			n, err := c.store.DeletePrefix(ctx, "response:"+prefix)
+			removed += n
+			if err != nil {
+				return removed, err
+			}
+			// Semantic sidecars live under sidx:<ns>, outside the tenant
+			// namespace, so they need their own tenant-scoped sweep.
+			n, err = c.store.DeletePrefix(ctx, "response:"+semanticIndexPrefix+prefix)
 			removed += n
 			if err != nil {
 				return removed, err
@@ -126,6 +133,10 @@ func (c *Cache) Invalidate(ctx context.Context, scope InvalidateScope) (int, err
 				if !seen[e.nsKey] {
 					seen[e.nsKey] = true
 					tierKeys = append(tierKeys, e.nsKey)
+				}
+				if sidecar := semanticIndexKey(e.nsKey); !seen[sidecar] {
+					seen[sidecar] = true
+					tierKeys = append(tierKeys, sidecar)
 				}
 				delete(c.memIndex, k)
 				removed++

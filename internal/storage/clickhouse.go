@@ -14,6 +14,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
 	"github.com/shadowsafin/synapass/internal/config"
+	"github.com/shadowsafin/synapass/internal/cost"
 	"github.com/shadowsafin/synapass/internal/domain"
 )
 
@@ -64,6 +65,11 @@ type ClickHouse struct {
 
 	mu      sync.Mutex
 	batches map[string]*pendingBatch
+
+	// pricer resolves per-attempt cost through versioned sheets. Nil in tests
+	// and lightweight deployments; per-attempt cost then falls back to the
+	// attempt target's registry rates (see attemptCost).
+	pricer AttemptPricer
 
 	stop   chan struct{}
 	wg     sync.WaitGroup
@@ -136,6 +142,27 @@ func NewClickHouse(ctx context.Context, cfg config.ClickHouseConfig, logger *slo
 		"batch_size", cfg.BatchSize, "flush_interval", cfg.FlushInterval.Std())
 
 	return ch, nil
+}
+
+// AttemptPricer prices one trace attempt's usage in USD.
+//
+// It mirrors the replay Runner's Pricer (internal/replay/runner.go): the
+// gateway wires the same versioned-sheet resolution live traffic uses
+// (tenant > model > provider > global, registry fallback), tests wire a stub.
+// The full attempt target is passed rather than bare names so the registry
+// fallback can price from the rates copied onto the target at decision time.
+type AttemptPricer func(ctx context.Context, tenantID string, target domain.RouteTarget, usage domain.TokenUsage) float64
+
+// SetPricer wires versioned-sheet pricing for per-attempt cost. It is called
+// once at construction before traffic flows; re-wiring later is serialized
+// with the write lock so a concurrent WriteTrace cannot observe a half-write.
+func (c *ClickHouse) SetPricer(p AttemptPricer) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pricer = p
 }
 
 // Ping verifies connectivity.
@@ -381,7 +408,7 @@ func (c *ClickHouse) WriteTrace(ctx context.Context, trace *domain.RequestTrace)
 			boolToUint8(attempt.FallbackTriggered),
 			uint32(clampInt(attempt.Usage.PromptTokens)),
 			uint32(clampInt(attempt.Usage.CompletionTokens)),
-			attemptCostOf(attempt),
+			c.attemptCost(ctx, trace.TenantID, attempt),
 			trace.StartedAt.Add(time.Duration(attempt.StartedOffsetMS)*time.Millisecond),
 		)
 	}
@@ -574,10 +601,45 @@ func firstTokenOf(trace *domain.RequestTrace) int64 {
 	return 0
 }
 
-// attemptCostOf is a placeholder for per-attempt cost.
+// attemptCost prices one trace attempt in USD for the trace_attempts.cost_usd
+// column.
 //
-// Cost is computed from the served model's price sheet, which the attempt record
-// does not carry. Phase 1 attributes cost at the request level in usage_events,
-// which is the authoritative figure; per-attempt cost arrives with the replay
-// feature, where the model registry revision is available.
-func attemptCostOf(domain.TraceAttempt) float64 { return 0 }
+// When a pricer is wired it wins: the pricer resolves the same versioned
+// sheet live traffic bills against (tenant > model > provider > global,
+// registry fallback), so retries and fallbacks accumulate what each provider
+// metered. Without a pricer the attempt is priced from the registry rates
+// copied onto its target at decision time — real USD in the common case, and
+// exactly 0 for genuinely unpriced targets (local runtimes, unknown models),
+// which is the only case that records 0 here.
+//
+// Either way the figure is informational: the request-level usage_events row
+// remains the billing authority. It zeroes unbilled work, carries the
+// base-fee/supersession policy, and is the number the cost views aggregate.
+func (c *ClickHouse) attemptCost(ctx context.Context, tenantID string, attempt domain.TraceAttempt) float64 {
+	var pricer AttemptPricer
+	if c != nil {
+		c.mu.Lock()
+		pricer = c.pricer
+		c.mu.Unlock()
+	}
+	if pricer != nil {
+		return pricer(ctx, tenantID, attempt.Target, attempt.Usage.Normalize())
+	}
+	return attemptRegistryCostUSD(attempt)
+}
+
+// attemptRegistryCostUSD is the pricer-less fallback: one cost-engine step at
+// the attempt target's own registry rates, base fee included to match the
+// per-step treatment in the request-level breakdown. It is pure computation
+// over domain types — no I/O — so unit tests pin it without a live
+// ClickHouse.
+func attemptRegistryCostUSD(attempt domain.TraceAttempt) float64 {
+	usage := attempt.Usage.Normalize()
+	price := cost.PriceFromTarget(attempt.Target)
+	bd := cost.Compute(usage, price, []cost.AttemptUsage{{
+		Label:       "attempt",
+		Usage:       usage,
+		BillBaseFee: true,
+	}})
+	return bd.TotalUSD
+}

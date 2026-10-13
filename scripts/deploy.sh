@@ -146,7 +146,17 @@ bootstrap_env() {
   local admin
   admin="$(env_get SYNAPASS_ADMIN_KEY)"
   [ -n "$admin" ] || fail "SYNAPASS_ADMIN_KEY is empty in .env. Set it to a long random value (e.g. the output of: openssl rand -hex 24)."
-  [ "$admin" != "$ADMIN_PLACEHOLDER" ] || fail "SYNAPASS_ADMIN_KEY still holds the .env.example placeholder, which production validation refuses. Set a real value in .env (e.g. the output of: openssl rand -hex 24)."
+  if [ "$admin" = "$ADMIN_PLACEHOLDER" ]; then
+    # Explicit local evaluation only: SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true
+    # keeps the shipped placeholder usable for a throwaway checkout. Anything
+    # else -- and the gateway's own production validation -- refuses it.
+    if [ "${SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY:-}" = "true" ]; then
+      warn "SYNAPASS_ADMIN_KEY is the shipped placeholder AND SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true."
+      warn "This install is NOT secured: anyone with the example file is admin. Never expose it."
+    else
+      fail "SYNAPASS_ADMIN_KEY still holds the .env.example placeholder, which production validation refuses. Set a real value in .env (e.g. the output of: openssl rand -hex 24). For a throwaway local evaluation only, export SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true."
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------

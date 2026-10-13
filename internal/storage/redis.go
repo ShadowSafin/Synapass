@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -214,6 +215,36 @@ func (r *Redis) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 		}
 	}
 	return removed, nil
+}
+
+// Scan returns the keys matching pattern, without the global prefix.
+// pattern is a Redis MATCH pattern over keys without the global prefix
+// (for example "response:sidx:*"). SCAN is used rather than KEYS for the
+// same reason as DeletePrefix: KEYS would block the server.
+func (r *Redis) Scan(ctx context.Context, pattern string) ([]string, error) {
+	if r == nil || r.client == nil {
+		return nil, nil
+	}
+	match := r.key(pattern)
+	trim := r.Prefix() + ":"
+	var (
+		cursor uint64
+		out    []string
+	)
+	for {
+		keys, next, err := r.client.Scan(ctx, cursor, match, 500).Result()
+		if err != nil {
+			return out, err
+		}
+		for _, k := range keys {
+			out = append(out, strings.TrimPrefix(k, trim))
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------

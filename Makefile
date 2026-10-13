@@ -29,7 +29,7 @@ LDFLAGS     := -s -w \
 .DEFAULT_GOAL := help
 .PHONY: help build install run config migrate test test-go test-workers lint fmt vet \
         tidy dashboard-install dashboard-build dashboard-typecheck up down logs \
-        ps deploy deploy-ps smoke smoke-ps clean docker-build native-install native-up native-doctor \
+        ps deploy deploy-ps smoke smoke-ps backup backup-ps restore restore-ps clean docker-build native-install native-up native-doctor \
         desktop-build desktop-test
 
 help: ## Show this help.
@@ -153,6 +153,18 @@ smoke: ## Verify the running stack end to end (needs the stack up; see scripts/s
 
 smoke-ps: ## Verify the running stack from Windows PowerShell.
 	powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1
+
+backup: ## Back up all stack state into ./backups/<timestamp> (DEST=... to override).
+	bash scripts/backup.sh $(DEST)
+
+backup-ps: ## Back up all stack state from Windows PowerShell.
+	powershell -ExecutionPolicy Bypass -File scripts/backup.ps1
+
+restore: ## Restore stack state: make restore SRC=backups/<ts> [WHAT=all|postgres|redis|clickhouse|volumes].
+	bash scripts/restore.sh $(SRC) $(or $(WHAT),all)
+
+restore-ps: ## Restore stack state from Windows PowerShell: make restore-ps SRC=backups/<ts>.
+	powershell -ExecutionPolicy Bypass -File scripts/restore.ps1 -Src "$(SRC)"
 
 down: ## Stop the stack, keeping volumes.
 	docker compose down

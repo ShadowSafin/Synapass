@@ -134,7 +134,17 @@ function Invoke-Up {
   }
   $Admin = Get-EnvValue "SYNAPASS_ADMIN_KEY"
   if ([string]::IsNullOrEmpty($Admin)) { Fail "environment bootstrap" "SYNAPASS_ADMIN_KEY is empty in .env. Set it to a long random value." }
-  if ($Admin -eq $AdminPlaceholder) { Fail "environment bootstrap" "SYNAPASS_ADMIN_KEY still holds the .env.example placeholder, which production validation refuses. Set a real value in .env." }
+  if ($Admin -eq $AdminPlaceholder) {
+    # Explicit local evaluation only: $env:SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true
+    # keeps the shipped placeholder usable for a throwaway checkout. Anything
+    # else -- and the gateway's own production validation -- refuses it.
+    if ([Environment]::GetEnvironmentVariable("SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY") -eq "true") {
+      Write-Host "  WARN SYNAPASS_ADMIN_KEY is the shipped placeholder AND SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY=true."
+      Write-Host "  WARN This install is NOT secured: anyone with the example file is admin. Never expose it."
+    } else {
+      Fail "environment bootstrap" "SYNAPASS_ADMIN_KEY still holds the .env.example placeholder, which production validation refuses. Set a real value in .env. For a throwaway local evaluation only, set `$env:SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY='true'."
+    }
+  }
 
   # 4. Start.
   # The dashboard shows a LAN URL for other devices; its host part is detected

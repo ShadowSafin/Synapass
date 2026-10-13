@@ -242,7 +242,9 @@ func NewServer(deps Deps) (*Server, error) {
 	// job store and the live adapters together; this constructor is the only
 	// place that holds all four. Pricing resolves through the same
 	// versioned-sheet path live traffic uses, so replay costs foot with the
-	// cost views instead of a second price book.
+	// cost views instead of a second price book. Scoring uses the
+	// deterministic eval scorers, and completion is published best-effort on
+	// NATS (nil-safe: a gateway without NATS runs replay unchanged).
 	if deps.Repositories != nil {
 		s.replayRunner = replay.NewRunner(replay.RunnerDeps{
 			Payloads: deps.Repositories.Payloads,
@@ -250,8 +252,18 @@ func NewServer(deps Deps) (*Server, error) {
 			Store:    deps.Repositories.Replay,
 			Adapters: deps.Adapters,
 			Pricer:   s.priceReplayUsage,
+			Scorer:   replay.EvalScorer{},
+			Events:   deps.NATS,
 			Logger:   logger,
 		})
+	}
+
+	// Per-attempt trace costs resolve through the same versioned-sheet path
+	// live traffic uses, so trace_attempts.cost_usd carries real USD instead
+	// of the zero placeholder. A nil writer simply skips the wiring and its
+	// writes stay dropped, as before.
+	if s.clickhouse != nil {
+		s.clickhouse.SetPricer(s.priceTraceAttempt)
 	}
 
 	// Parse the trusted proxy list once. A malformed entry is reported at startup

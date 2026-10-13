@@ -35,9 +35,11 @@
 #     the exception: it requires a console login, so it binds 0.0.0.0 by
 #     default and is reachable from other devices on your LAN
 #     (http://<lan-ip>:3000) as well as from localhost.
-#   * Resource limits are set on the gateway. An unbounded gateway under a traffic
-#     spike takes down the database on the same host, which is the single most
-#     common self-hosting failure.
+#   * Resource limits are set on every service. An unbounded container under a
+#     traffic spike takes down the database on the same host, which is the
+#     single most common self-hosting failure. Limits are ceilings, not
+#     reservations: their sum may exceed the host, but the reservations sum
+#     (~1.6 GB) is what a 4 GB host must actually have free.
 
 name: synapass
 
@@ -77,6 +79,17 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    # Single-node ceiling: the working set lives in shared_buffers + the OS page
+    # cache, so 1G is enough for the shipped workload; raise it before
+    # importing a large existing dataset.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   redis:
     image: redis:7-alpine
@@ -101,6 +114,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # Capped to match --maxmemory 512mb plus process overhead; eviction (allkeys-lru)
+    # handles pressure before the OOM killer does.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 640M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.8-alpine
@@ -128,6 +151,17 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    # The heaviest service in the stack: merges and batch inserts are CPU- and
+    # memory-hungry. 2G is a floor for a working install, not headroom for a
+    # large backfill -- raise it (and the host) before replaying history.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.50"
+          memory: 512M
 
   nats:
     image: nats:2.10-alpine
@@ -151,6 +185,16 @@ services:
       timeout: 3s
       retries: 20
       start_period: 10s
+    # Single-node JetStream (replicas: 1, see streams.py / internal/storage/nats.go).
+    # NATS itself is light; the limit only stops a wedged store from eating the host.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 32M
 
   # ---------------------------------------------------------------------------
   # Control plane
@@ -239,6 +283,15 @@ services:
         reservations:
           cpus: "0.25"
           memory: 128M
+    # Mirrors the image HEALTHCHECK so the dashboard's service_healthy gate is
+    # visible here rather than implied by image metadata. Same probe the
+    # systemd unit uses.
+    healthcheck:
+      test: ["CMD", "synapass", "health", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
 
   # ---------------------------------------------------------------------------
   # Intelligence tier
@@ -262,6 +315,25 @@ services:
       SYNAPASS_WORKER_LABELS: pool=default
     ports:
       - "127.0.0.1:9101:9101"
+    # Eval jobs are CPU-bound (scoring) with small RSS; the limit keeps a
+    # poisoned job batch from starving the gateway on the same host.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    # The metrics port doubles as liveness: a worker whose loop has died stops
+    # serving it. Mirrors the image HEALTHCHECK (urllib, because the slim image
+    # ships no curl/wget).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=4)\""]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   dashboard:
     build:
@@ -290,6 +362,23 @@ services:
       # http://<lan-ip>:3000 from phones and other devices. Set
       # DASHBOARD_BIND=127.0.0.1 to keep it loopback-only.
       - "${DASHBOARD_BIND:-0.0.0.0}:3000:3000"
+    # Node RSS is dominated by the SSR bundle; 512M leaves headroom while
+    # stopping a leak from taking the host.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
+    # Mirrors the image HEALTHCHECK so `up` can gate on it explicitly.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ---------------------------------------------------------------------------
   # Observability
@@ -306,6 +395,15 @@ services:
       - "127.0.0.1:4318:4318" # OTLP/HTTP
       - "127.0.0.1:4317:4317" # OTLP/gRPC
       - "127.0.0.1:8889:8889" # collector self-metrics
+    # Stateless fan-out; small and bounded by batch limits in collector-config.yaml.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -321,6 +419,15 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
+    # TSDB head + 15d retention is the second-heaviest resident after ClickHouse.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   loki:
     image: grafana/loki:3.1.1
@@ -331,6 +438,15 @@ services:
       - loki-data:/loki
     ports:
       - "127.0.0.1:3100:3100"
+    # Bounded by the boltdb-shipper cache; 512M is generous for a single node.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
 
   promtail:
     image: grafana/promtail:3.1.1
@@ -346,6 +462,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - loki
+    # Tails files and ships them; near-stateless.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -366,6 +491,15 @@ services:
       - grafana-data:/var/lib/grafana
     ports:
       - "127.0.0.1:3001:3000"
+    # Frontend + alerting; steady-state RSS is a few hundred MB.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
 
 volumes:
   postgres-data:

@@ -60,6 +60,20 @@ type Engine struct{}
 // New creates an engine.
 func New() *Engine { return &Engine{} }
 
+// Score deterministically scores one candidate answer against a reference,
+// returning the composite score and the per-metric breakdown. It is the
+// single-call equivalent of Compare for one output, and the function the
+// replay runner wires to so stored scores never come from a second,
+// divergent scorer.
+func Score(reference, candidate string) (float64, map[string]float64) {
+	m := scoreText(reference, candidate)
+	return composite(m), m
+}
+
+// Composite combines per-metric scores into one number with the engine's
+// canonical weights.
+func Composite(m map[string]float64) float64 { return composite(m) }
+
 // Compare scores every output against the reference.
 func (e *Engine) Compare(in CompareInput) CompareResult {
 	scores := map[string]map[string]float64{}
