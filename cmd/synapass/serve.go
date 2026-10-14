@@ -11,6 +11,7 @@ import (
 
 	"github.com/shadowsafin/synapass/internal/api"
 	"github.com/shadowsafin/synapass/internal/auth"
+	"github.com/shadowsafin/synapass/internal/benchmark"
 	"github.com/shadowsafin/synapass/internal/bootstrap"
 	"github.com/shadowsafin/synapass/internal/config"
 	"github.com/shadowsafin/synapass/internal/domain"
@@ -49,6 +50,11 @@ type App struct {
 
 	// tunnels owns the temporary-tunnel child process, if any.
 	tunnels *tunnel.Manager
+
+	// benchmark is the Autonomous Benchmark Engine. It is inert (no
+	// scheduler, no workers) unless ENABLE_BENCHMARK_ENGINE=true, so the
+	// gateway behaves exactly as before when the feature is off.
+	benchmark *benchmark.Engine
 
 	server *api.Server
 
@@ -324,6 +330,12 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 		Metrics:   platMetrics,
 	})
 
+	// ---- Autonomous Benchmark Engine (disabled by default) ----
+	// Built unconditionally so the admin surface can report enabled=false;
+	// it starts workers and the scheduler only when the master switch is on,
+	// leaving gateway performance untouched otherwise.
+	app.benchmark = bootstrap.BuildBenchmark(cfg, app.repos, app.redis, logger)
+
 	// ---- HTTP ----
 	server, err := api.NewServer(api.Deps{
 		Config:        cfg,
@@ -345,6 +357,7 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 		Metrics:       app.metrics,
 		Tracer:        tracer,
 		Recorder:      app.recorder,
+		Benchmark:     app.benchmark,
 		Tools: &api.ToolServices{
 			Registry:    app.repos.Tools,
 			Policies:    app.repos.ToolPolicies,
@@ -391,6 +404,10 @@ func buildApp(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Ap
 		app.startHealthProbes()
 	}
 	app.startUsageReconciliation()
+
+	// The benchmark engine starts its scheduler and workers only when
+	// enabled; otherwise Start is a logged no-op.
+	app.benchmark.Start(context.Background())
 
 	return app, nil
 }
@@ -574,6 +591,12 @@ func (a *App) Run(ctx context.Context) error {
 	if a.cancelLoops != nil {
 		a.cancelLoops()
 		a.loops.Wait()
+	}
+
+	// Stop benchmark workers and the scheduler before flushing telemetry so
+	// no new measurements land mid-drain. No-op when disabled.
+	if a.benchmark != nil {
+		a.benchmark.Stop()
 	}
 
 	if a.recorder != nil {
