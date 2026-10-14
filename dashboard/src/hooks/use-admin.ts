@@ -9,6 +9,18 @@ import type {
   AnalyticsReport,
   AgentStep,
   AuditEvent,
+  BenchmarkDataset,
+  BenchmarkHealthStatus,
+  BenchmarkInsight,
+  BenchmarkJob,
+  BenchmarkJobInput,
+  BenchmarkNotification,
+  BenchmarkOverview,
+  BenchmarkProviderHealth,
+  BenchmarkReport,
+  BenchmarkResult,
+  BenchmarkRun,
+  BenchmarkStatus,
   Budget,
   CacheEntry,
   CacheInvalidation,
@@ -105,6 +117,17 @@ export const queryKeys = {
   providerTests: (providerId: string, limit: number) => ['provider-tests', providerId, limit] as const,
   cost: (filters: Record<string, unknown>) => ['cost', filters] as const,
   pricing: () => ['pricing'] as const,
+  benchmarkStatus: () => ['benchmark-status'] as const,
+  benchmarkOverview: (tenantId: string) => ['benchmark-overview', tenantId] as const,
+  benchmarkJobs: (tenantId: string) => ['benchmark-jobs', tenantId] as const,
+  benchmarkRuns: (filters: Record<string, unknown>) => ['benchmark-runs', filters] as const,
+  benchmarkHistory: (filters: Record<string, unknown>) => ['benchmark-history', filters] as const,
+  benchmarkHealth: (filters: Record<string, unknown>) => ['benchmark-health', filters] as const,
+  benchmarkCompare: (filters: Record<string, unknown>) => ['benchmark-compare', filters] as const,
+  benchmarkInsights: (tenantId: string) => ['benchmark-insights', tenantId] as const,
+  benchmarkReports: (tenantId: string) => ['benchmark-reports', tenantId] as const,
+  benchmarkDatasets: (tenantId: string) => ['benchmark-datasets', tenantId] as const,
+  benchmarkNotifications: (tenantId: string) => ['benchmark-notifications', tenantId] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -1382,3 +1405,277 @@ export function useCostSavings(filters: CostFilters) {
       apiFetch<CostSavingsResponse>(`cost/savings${buildQuery(costQuery(filters))}`, { signal }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Autonomous Benchmark Engine (disabled by default)
+// ---------------------------------------------------------------------------
+
+/** Whether the engine is enabled. The page hides itself when it is not. */
+export function useBenchmarkStatus() {
+  return useQuery({
+    queryKey: queryKeys.benchmarkStatus(),
+    queryFn: ({ signal }) => apiFetch<BenchmarkStatus>('benchmark/status', { signal }),
+    // A disabled engine is a normal state, not an error worth retrying.
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** The Benchmark overview header: engine, scheduler, queue and totals. */
+export function useBenchmarkOverview(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkOverview(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<BenchmarkOverview>(`benchmark/overview${buildQuery({ tenant_id: tenantId || undefined })}`, {
+        signal,
+      }),
+    // The header is a live tail: poll while mounted so runs started elsewhere
+    // appear without a manual refresh.
+    refetchInterval: 5_000,
+  });
+}
+
+export function useBenchmarkJobs(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkJobs(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<{ jobs: BenchmarkJob[] | null }>(
+        `benchmark/jobs${buildQuery({ tenant_id: tenantId || undefined, limit: 100 })}`,
+        { signal },
+      ).then((d) => d.jobs ?? []),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useCreateBenchmarkJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BenchmarkJobInput) =>
+      apiFetch<BenchmarkJob>('benchmark/jobs', { method: 'POST', body: input }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-jobs'] });
+      void client.invalidateQueries({ queryKey: ['benchmark-overview'] });
+    },
+  });
+}
+
+export function useUpdateBenchmarkJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; patch: Partial<BenchmarkJobInput> }) =>
+      apiFetch<BenchmarkJob>(`benchmark/jobs/${encodeURIComponent(input.id)}`, {
+        method: 'PUT',
+        body: input.patch,
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-jobs'] });
+      void client.invalidateQueries({ queryKey: ['benchmark-overview'] });
+    },
+  });
+}
+
+export function useDeleteBenchmarkJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ deleted: string }>(`benchmark/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-jobs'] });
+      void client.invalidateQueries({ queryKey: ['benchmark-overview'] });
+    },
+  });
+}
+
+export function useTriggerBenchmarkRun() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { job_id: string; tenant_id?: string }) =>
+      apiFetch<BenchmarkRun>('benchmark/run', { method: 'POST', body: input }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-runs'] });
+      void client.invalidateQueries({ queryKey: ['benchmark-overview'] });
+    },
+  });
+}
+
+export interface BenchmarkRunFilters {
+  tenantId?: string;
+  jobId?: string;
+  limit?: number;
+}
+
+export function useBenchmarkRuns(filters: BenchmarkRunFilters = {}) {
+  const params = { tenant_id: filters.tenantId, job_id: filters.jobId, limit: filters.limit ?? 20 };
+  return useQuery({
+    queryKey: queryKeys.benchmarkRuns(params),
+    queryFn: ({ signal }) =>
+      apiFetch<{ runs: BenchmarkRun[] | null }>(`benchmark/runs${buildQuery(params)}`, { signal }).then(
+        (d) => d.runs ?? [],
+      ),
+    refetchInterval: 5_000,
+  });
+}
+
+export interface BenchmarkHistoryFilters {
+  tenantId?: string;
+  jobId?: string;
+  provider?: string;
+  model?: string;
+  category?: string;
+  /** 1h | 24h | 7d | 30d | 90d | 1y | custom (with from/to) */
+  range?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function useBenchmarkHistory(filters: BenchmarkHistoryFilters = {}) {
+  const params = {
+    tenant_id: filters.tenantId,
+    job_id: filters.jobId,
+    provider: filters.provider,
+    model: filters.model,
+    category: filters.category,
+    range: filters.range ?? '24h',
+    from: filters.from,
+    to: filters.to,
+    limit: filters.limit ?? 200,
+    offset: filters.offset ?? 0,
+  };
+  return useQuery({
+    queryKey: queryKeys.benchmarkHistory(params),
+    queryFn: ({ signal }) =>
+      apiFetch<{ results: BenchmarkResult[] | null }>(`benchmark/history${buildQuery(params)}`, {
+        signal,
+      }).then((d) => d.results ?? []),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useBenchmarkHealth(tenantId = '', range = '24h') {
+  const params = { tenant_id: tenantId || undefined, range };
+  return useQuery({
+    queryKey: queryKeys.benchmarkHealth(params),
+    queryFn: ({ signal }) =>
+      apiFetch<{ health: BenchmarkProviderHealth[] | null }>(`benchmark/health${buildQuery(params)}`, {
+        signal,
+      }).then((d) => d.health ?? []),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useBenchmarkCompare(tenantId = '', providers: string[] = [], range = '24h') {
+  const params = { tenant_id: tenantId || undefined, providers: providers.join(','), range };
+  return useQuery({
+    queryKey: queryKeys.benchmarkCompare(params),
+    queryFn: ({ signal }) =>
+      apiFetch<{ comparison: BenchmarkProviderHealth[] | null }>(
+        `benchmark/compare${buildQuery(params)}`,
+        { signal },
+      ).then((d) => d.comparison ?? []),
+    enabled: providers.length > 0,
+  });
+}
+
+export function useBenchmarkInsights(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkInsights(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<{ insights: BenchmarkInsight[] | null }>(
+        `benchmark/insights${buildQuery({ tenant_id: tenantId || undefined })}`,
+        { signal },
+      ).then((d) => d.insights ?? []),
+    staleTime: 60_000,
+  });
+}
+
+export function useBenchmarkReports(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkReports(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<{ reports: BenchmarkReport[] | null }>(
+        `benchmark/report${buildQuery({ tenant_id: tenantId || undefined })}`,
+        { signal },
+      ).then((d) => d.reports ?? []),
+  });
+}
+
+export function useGenerateBenchmarkReport() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (period: string) =>
+      apiFetch<BenchmarkReport>(`benchmark/report${buildQuery({ period, generate: 'true' })}`, {
+        method: 'GET',
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-reports'] });
+    },
+  });
+}
+
+export function useBenchmarkDatasets(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkDatasets(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<{ datasets: BenchmarkDataset[] | null }>(
+        `benchmark/datasets${buildQuery({ tenant_id: tenantId || undefined })}`,
+        { signal },
+      ).then((d) => d.datasets ?? []),
+  });
+}
+
+export function useBenchmarkNotifications(tenantId = '') {
+  return useQuery({
+    queryKey: queryKeys.benchmarkNotifications(tenantId),
+    queryFn: ({ signal }) =>
+      apiFetch<{ notifications: BenchmarkNotification[] | null }>(
+        `benchmark/notifications${buildQuery({ tenant_id: tenantId || undefined })}`,
+        { signal },
+      ).then((d) => d.notifications ?? []),
+  });
+}
+
+export interface BenchmarkNotificationInput {
+  channel: string;
+  target: string;
+  events?: string[];
+  enabled?: boolean;
+  tenant_id?: string;
+}
+
+export function useCreateBenchmarkNotification() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BenchmarkNotificationInput) =>
+      apiFetch<BenchmarkNotification>('benchmark/notifications', { method: 'POST', body: input }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['benchmark-notifications'] });
+    },
+  });
+}
+
+/**
+ * Enable or disable the engine from the Benchmark page.
+ *
+ * Flipping the switch persists server-side and starts (or stops) the
+ * scheduler and workers immediately — no restart needed. Enabling requires
+ * full admin scope; a read-only operator gets a 403.
+ */
+export function useSetBenchmarkEnabled() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<{ enabled: boolean; config_enabled?: boolean }>('benchmark/enabled', {
+        method: 'POST',
+        body: { enabled },
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.benchmarkStatus() });
+      void client.invalidateQueries({ queryKey: ['benchmark-overview'] });
+      void client.invalidateQueries({ queryKey: ['benchmark-jobs'] });
+    },
+  });
+}
+
+export type { BenchmarkHealthStatus };
