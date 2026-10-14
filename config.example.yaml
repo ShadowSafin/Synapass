@@ -292,6 +292,22 @@ detection:
   concurrency: 2
   timeout_per_model: 90s
 
+# Autonomous Benchmark Engine: continuous provider/model benchmarking with
+# historical metrics, reports and a live analytics dashboard. DISABLED by
+# default — the gateway runs unchanged until enabled. Set enabled: true (or
+# ENABLE_BENCHMARK_ENGINE=true) to opt in. The module is self-contained
+# (internal/benchmark) so it can later be extracted or sold as enterprise.
+benchmark:
+  enabled: false
+  scheduler_enabled: true
+  workers: 2
+  queue_size: 1000
+  default_timeout: 60s
+  default_concurrency: 5
+  max_daily_cost_usd: 0
+  retention_days: 0
+  redis_queue_key: benchmark:queue
+
 telemetry:
   # Overrides app.name for the OTel resource.
   service_name: ""
