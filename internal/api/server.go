@@ -24,6 +24,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/shadowsafin/synapass/internal/auth"
+	"github.com/shadowsafin/synapass/internal/benchmark"
 	"github.com/shadowsafin/synapass/internal/config"
 	"github.com/shadowsafin/synapass/internal/cost"
 	"github.com/shadowsafin/synapass/internal/dashboardauth"
@@ -125,6 +126,11 @@ type Deps struct {
 	// gateway deployed only as an inference proxy has no console to protect.
 	DashboardAuth *dashboardauth.Service
 
+	// Benchmark is the Autonomous Benchmark Engine. Nil or disabled means the
+	// benchmark routes report the feature as disabled and no background work
+	// runs; the gateway behaves exactly as before.
+	Benchmark *benchmark.Engine
+
 	// StartedAt is used to report uptime.
 	StartedAt time.Time
 }
@@ -181,6 +187,9 @@ type Server struct {
 	// dashboardAuth authenticates console operators. Nil disables the surface.
 	dashboardAuth *dashboardauth.Service
 
+	// benchmark is the Autonomous Benchmark Engine. Nil disables the surface.
+	benchmark *benchmark.Engine
+
 	// priceCache memoizes resolved versioned price sheets on the request
 	// path so exact costing costs a map lookup, not a query.
 	priceCache *cost.PriceCache
@@ -234,6 +243,7 @@ func NewServer(deps Deps) (*Server, error) {
 		tunnels:    deps.Tunnels,
 
 		dashboardAuth: deps.DashboardAuth,
+		benchmark:     deps.Benchmark,
 		startedAt:     deps.StartedAt,
 		priceCache:    cost.NewPriceCache(priceCacheTTL),
 	}
@@ -518,6 +528,36 @@ func (s *Server) buildRouter() http.Handler {
 			r.Get("/tunnels/status", s.handleTunnelStatus)
 			r.Get("/tunnels/current-url", s.handleTunnelCurrentURL)
 			r.Get("/tunnels/history", s.handleTunnelHistory)
+
+			// Autonomous Benchmark Engine. All routes are registered whenever
+			// the engine handle exists (it always does); each handler gates
+			// on the effective switch and answers 404 while disabled, so an
+			// operator can enable the engine from the Benchmark page at
+			// runtime without a restart. The scheduler and workers likewise
+			// start on demand through POST /benchmark/enabled.
+			r.Get("/benchmark/status", s.handleBenchmarkStatus)
+			if s.benchmark != nil {
+				r.Post("/benchmark/enabled", s.handleBenchmarkSetEnabled)
+				r.Get("/benchmark/overview", s.handleBenchmarkOverview)
+				r.Get("/benchmark/jobs", s.handleBenchmarkListJobs)
+				r.Post("/benchmark/jobs", s.handleBenchmarkCreateJob)
+				r.Put("/benchmark/jobs/{id}", s.handleBenchmarkUpdateJob)
+				r.Delete("/benchmark/jobs/{id}", s.handleBenchmarkDeleteJob)
+				r.Post("/benchmark/run", s.handleBenchmarkRun)
+				r.Get("/benchmark/runs", s.handleBenchmarkRuns)
+				r.Get("/benchmark/history", s.handleBenchmarkHistory)
+				r.Get("/benchmark/report", s.handleBenchmarkReport)
+				r.Get("/benchmark/live", s.handleBenchmarkLive)
+				r.Get("/benchmark/providers", s.handleBenchmarkProviders)
+				r.Get("/benchmark/models", s.handleBenchmarkModels)
+				r.Get("/benchmark/health", s.handleBenchmarkHealth)
+				r.Get("/benchmark/compare", s.handleBenchmarkCompare)
+				r.Get("/benchmark/insights", s.handleBenchmarkInsights)
+				r.Get("/benchmark/datasets", s.handleBenchmarkDatasets)
+				r.Post("/benchmark/datasets", s.handleBenchmarkDatasets)
+				r.Get("/benchmark/notifications", s.handleBenchmarkNotifications)
+				r.Post("/benchmark/notifications", s.handleBenchmarkNotifications)
+			}
 		})
 	}
 
