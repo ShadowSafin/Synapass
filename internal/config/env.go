@@ -322,6 +322,24 @@ func (c *Config) applyEnv() error {
 	envInt(&c.Detection.Concurrency, "SYNAPASS_DETECTION_CONCURRENCY")
 	envDuration(&c.Detection.TimeoutPerModel, "SYNAPASS_DETECTION_TIMEOUT_PER_MODEL")
 
+	// ---- benchmark engine (disabled by default) ----
+	// ENABLE_BENCHMARK_ENGINE is the documented global switch (spec); the
+	// SYNAPASS_ spelling is the namespaced alias so every setting stays
+	// reachable under the standard prefix as well.
+	if v := firstEnv("ENABLE_BENCHMARK_ENGINE", "SYNAPASS_BENCHMARK_ENABLED", "SYNAPASS_BENCHMARK_ENGINE_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(strings.ToLower(v)); err == nil {
+			c.Benchmark.Enabled = b
+		}
+	}
+	envBool(&c.Benchmark.SchedulerEnabled, "SYNAPASS_BENCHMARK_SCHEDULER_ENABLED")
+	envInt(&c.Benchmark.Workers, "SYNAPASS_BENCHMARK_WORKERS")
+	envInt(&c.Benchmark.QueueSize, "SYNAPASS_BENCHMARK_QUEUE_SIZE")
+	envDuration(&c.Benchmark.DefaultTimeout, "SYNAPASS_BENCHMARK_DEFAULT_TIMEOUT")
+	envInt(&c.Benchmark.DefaultConcurrency, "SYNAPASS_BENCHMARK_DEFAULT_CONCURRENCY")
+	envFloat(&c.Benchmark.MaxDailyCostUSD, "SYNAPASS_BENCHMARK_MAX_DAILY_COST_USD")
+	envInt(&c.Benchmark.RetentionDays, "SYNAPASS_BENCHMARK_RETENTION_DAYS")
+	envString(&c.Benchmark.RedisQueueKey, "SYNAPASS_BENCHMARK_REDIS_QUEUE_KEY")
+
 	// ---- telemetry ----
 	envString(&c.Telemetry.ServiceName, "SYNAPASS_OTEL_SERVICE_NAME")
 	envString(&c.Telemetry.OTLPEndpoint, "SYNAPASS_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT")
