@@ -1202,3 +1202,213 @@ export interface CostSavingsResponse {
   savings: CostSavings;
   total_usd: number;
 }
+
+// ---------------------------------------------------------------------------
+// Autonomous Benchmark Engine (disabled by default; enable with
+// ENABLE_BENCHMARK_ENGINE=true on the gateway and
+// NEXT_PUBLIC_ENABLE_BENCHMARK_ENGINE=true on the dashboard).
+// ---------------------------------------------------------------------------
+
+export type BenchmarkSchedule =
+  | 'every_minute'
+  | 'every_5m'
+  | 'every_15m'
+  | 'every_30m'
+  | 'every_hour'
+  | 'every_3h'
+  | 'every_6h'
+  | 'every_12h'
+  | 'every_24h'
+  | 'custom';
+
+export type BenchmarkHealthStatus = 'healthy' | 'slow' | 'degraded' | 'down';
+
+export interface BenchmarkOverview {
+  engine_enabled: boolean;
+  engine_status: string;
+  scheduler_status: string;
+  active_jobs: number;
+  running_workers: number;
+  queue_size: number;
+  last_benchmark?: string;
+  next_benchmark?: string;
+  avg_benchmark_duration_ms: number;
+  total_benchmarks: number;
+  success_rate: number;
+  failed_jobs: number;
+  total_daily_cost_usd: number;
+  total_tokens_benchmarked: number;
+}
+
+export interface BenchmarkJob {
+  id: string;
+  tenant_id?: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  providers: string[];
+  models: string[];
+  dataset_id?: string;
+  schedule: BenchmarkSchedule | string;
+  cron_expression?: string;
+  timeout_ms: number;
+  retry_count: number;
+  region?: string;
+  concurrency: number;
+  max_daily_budget_usd: number;
+  tags?: Record<string, string>;
+  last_run_at?: string;
+  next_run_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkJobInput {
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  providers: string[];
+  models: string[];
+  dataset_id?: string;
+  schedule?: string;
+  cron_expression?: string;
+  timeout_ms?: number;
+  retry_count?: number;
+  region?: string;
+  concurrency?: number;
+  max_daily_budget_usd?: number;
+  tags?: Record<string, string>;
+}
+
+export interface BenchmarkRun {
+  id: string;
+  job_id: string;
+  tenant_id?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  started_at: string;
+  finished_at?: string;
+  duration_ms: number;
+  total_probes: number;
+  success_count: number;
+  failure_count: number;
+  total_cost_usd: number;
+  total_tokens: number;
+  error?: string;
+  created_at: string;
+}
+
+export interface BenchmarkResult {
+  id: string;
+  run_id: string;
+  job_id: string;
+  tenant_id?: string;
+  provider: string;
+  model: string;
+  prompt_id?: string;
+  category?: string;
+  ttft_ms: number;
+  latency_ms: number;
+  tokens_per_second: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  success: boolean;
+  error?: string;
+  error_type?: string;
+  http_status: number;
+  retry_count: number;
+  finish_reason?: string;
+  streaming_speed_tps?: number;
+  json_success?: boolean;
+  tool_calling_success?: boolean;
+  context_length: number;
+  provider_metadata?: Record<string, string>;
+  created_at: string;
+}
+
+export interface BenchmarkProviderHealth {
+  provider: string;
+  status: BenchmarkHealthStatus | string;
+  uptime: number;
+  avg_latency_ms: number;
+  avg_ttft_ms: number;
+  avg_cost_usd: number;
+  avg_tokens_per_second: number;
+  avg_streaming_tps: number;
+  success_rate: number;
+  last_failure?: string;
+  last_benchmark?: string;
+  total_probes: number;
+}
+
+export interface BenchmarkReport {
+  id: string;
+  tenant_id?: string;
+  period: 'daily' | 'weekly' | 'monthly' | string;
+  period_start: string;
+  period_end: string;
+  fastest_provider?: string;
+  cheapest_provider?: string;
+  most_reliable_provider?: string;
+  lowest_latency_provider?: string;
+  highest_throughput_provider?: string;
+  highest_success_rate_provider?: string;
+  biggest_regression?: string;
+  biggest_improvement?: string;
+  overall_winner?: string;
+  summary?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BenchmarkInsight {
+  text: string;
+  severity?: string;
+  provider?: string;
+  metric?: string;
+  delta_pct?: number;
+  created_at: string;
+}
+
+export interface BenchmarkPrompt {
+  id: string;
+  dataset_id?: string;
+  prompt: string;
+  category: string;
+  expected_json?: string;
+  difficulty: string;
+  weight: number;
+  max_tokens: number;
+  temperature: number;
+  created_at: string;
+}
+
+export interface BenchmarkDataset {
+  id: string;
+  tenant_id?: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  prompts?: BenchmarkPrompt[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkNotification {
+  id: string;
+  tenant_id?: string;
+  channel: 'email' | 'discord' | 'slack' | string;
+  target: string;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkStatus {
+  enabled: boolean;
+  engine_status: string;
+  scheduler_status: string;
+  /** True when the server configuration forces the engine on. */
+  config_enabled?: boolean;
+}
