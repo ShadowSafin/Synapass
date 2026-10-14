@@ -246,6 +246,11 @@ services:
       # is off unless enabled here. Must be listed explicitly: compose only
       # injects variables that are interpolated below.
       SYNAPASS_DETECTION_ENABLED: ${SYNAPASS_DETECTION_ENABLED:-false}
+      # Autonomous Benchmark Engine (disabled by default). On means the
+      # scheduler and workers start and the benchmark API routes exist;
+      # off means zero impact on the inference gateway. Must be listed
+      # explicitly: compose only injects interpolated variables.
+      ENABLE_BENCHMARK_ENGINE: ${ENABLE_BENCHMARK_ENGINE:-false}
       SYNAPASS_LOG_FORMAT: json
       # The dashboard origin must be allowed explicitly; a wildcard is refused in
       # production by configuration validation.
@@ -343,6 +348,7 @@ services:
         # Inlined into the browser bundle at build time, so it must be the address
         # a browser can reach, not the compose service name.
         NEXT_PUBLIC_SYNAPASS_API_URL: ${NEXT_PUBLIC_SYNAPASS_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_ENABLE_BENCHMARK_ENGINE: ${NEXT_PUBLIC_ENABLE_BENCHMARK_ENGINE:-false}
     <<: [*restart, *logging]
     depends_on:
       gateway:
