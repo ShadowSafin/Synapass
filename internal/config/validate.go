@@ -60,6 +60,7 @@ func (c *Config) Validate() error {
 	c.validateCache(v)
 	c.validateTunnel(v)
 	c.validatePhase2(v)
+	c.validateBenchmark(v)
 	c.validateTelemetry(v)
 	c.validateLogging(v)
 	c.validateAdmin(v)
@@ -623,6 +624,39 @@ func isLoopbackHost(host string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// validateBenchmark checks the Autonomous Benchmark Engine configuration.
+//
+// The engine is disabled by default; validation only constrains the shape of
+// the values so an operator who enables it gets a fast, actionable error
+// instead of a broken scheduler at runtime.
+func (c *Config) validateBenchmark(v *ValidationError) {
+	b := c.Benchmark
+	if b.Workers < 0 || b.Workers > 100 {
+		v.add("benchmark.workers %d must be between 0 and 100", b.Workers)
+	}
+	if b.QueueSize < 0 || b.QueueSize > 100000 {
+		v.add("benchmark.queue_size %d must be between 0 and 100000", b.QueueSize)
+	}
+	if b.DefaultTimeout.Std() < 0 {
+		v.add("benchmark.default_timeout must not be negative")
+	}
+	if b.Enabled && b.DefaultTimeout.Std() <= 0 {
+		v.add("benchmark.default_timeout must be positive when benchmark.enabled is true")
+	}
+	if b.DefaultConcurrency < 0 || b.DefaultConcurrency > 100 {
+		v.add("benchmark.default_concurrency %d must be between 0 and 100", b.DefaultConcurrency)
+	}
+	if b.MaxDailyCostUSD < 0 {
+		v.add("benchmark.max_daily_cost_usd must not be negative")
+	}
+	if b.RetentionDays < 0 {
+		v.add("benchmark.retention_days must not be negative")
+	}
+	if b.Enabled && b.RedisQueueKey == "" {
+		v.add("benchmark.redis_queue_key must not be empty when benchmark.enabled is true")
 	}
 }
 
