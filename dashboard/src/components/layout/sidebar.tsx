@@ -33,7 +33,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import * as React from 'react';
 
-import { useBenchmarkStatus, useCurrentUser, useProviderHealth } from '@/hooks/use-admin';
+import { useCurrentUser, useProviderHealth } from '@/hooks/use-admin';
 import { cn } from '@/lib/utils';
 
 export function SidebarBrand({ compact = false }: { compact?: boolean }) {
@@ -168,7 +168,6 @@ const MORE_ITEMS: NavItem[] = [
 export function Sidebar({ onNavigate, inDrawer = false }: { onNavigate?: () => void; inDrawer?: boolean }) {
   const pathname = usePathname();
   const { data: health } = useProviderHealth();
-  const { data: benchStatus } = useBenchmarkStatus();
   const [moreOpen, setMoreOpen] = React.useState(() => MORE_ITEMS.some((item) => item.href === pathname));
 
   React.useEffect(() => {
@@ -177,12 +176,9 @@ export function Sidebar({ onNavigate, inDrawer = false }: { onNavigate?: () => v
 
   const unhealthy = (health ?? []).filter((h) => h.state === 'unhealthy' || h.state === 'degraded').length;
 
-  // The Benchmark entry appears when the dashboard is built with the feature
-  // flag OR the engine is enabled at runtime (e.g. from the Benchmark page
-  // itself), so enabling never requires a dashboard rebuild. Disabled by
-  // default: the query fails closed to hidden.
-  const showBenchmark =
-    process.env.NEXT_PUBLIC_ENABLE_BENCHMARK_ENGINE === 'true' || benchStatus?.enabled === true;
+  // The Benchmark entry is always visible. When the engine is disabled the
+  // page itself renders the enable switch, so hiding the entry would only
+  // hide the way to turn it on.
   const benchmarkItem: NavItem = {
     href: '/benchmark',
     label: 'Benchmark',
@@ -198,9 +194,9 @@ export function Sidebar({ onNavigate, inDrawer = false }: { onNavigate?: () => v
           .map((item) =>
             item.href === '/providers' && unhealthy > 0 ? { ...item, badge: unhealthy, badgeAlert: true } : item,
           )
-          .concat(section.title === 'Workspace' && showBenchmark ? [benchmarkItem] : []),
+          .concat(section.title === 'Workspace' ? [benchmarkItem] : []),
       })),
-    [unhealthy, showBenchmark],
+    [unhealthy],
   );
 
   const isActive = (href: string) => pathname === href;
