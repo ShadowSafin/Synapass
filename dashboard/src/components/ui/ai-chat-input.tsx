@@ -723,56 +723,6 @@ export const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
                     <MorphingText text={selectedModel} />
                   </span>
                 </button>
-
-                <div
-                  style={{ transformOrigin: "bottom left" }}
-                  onMouseLeave={() => {
-                    setHoverStyle((prev) => ({
-                      ...prev,
-                      opacity: 0,
-                      transform: prev.transform.replace("scale(1)", "scale(0.95)"),
-                      transition: "opacity 0.2s ease-in, transform 0.2s ease-out",
-                    }));
-                  }}
-                  className={cn(
-                    "absolute bottom-full left-0 mb-2.5 z-50 w-44 max-w-[calc(100vw-3rem)] rounded-2xl border border-border bg-card/95 p-1 shadow-xl backdrop-blur-md flex flex-col gap-0.5 transition-all duration-300 cursor-default",
-                    isModelSelectOpen
-                      ? "opacity-100 scale-100 translate-y-0 pointer-events-auto ease-[cubic-bezier(0.34,1.56,0.64,1)]"
-                      : "opacity-0 scale-95 translate-y-3 pointer-events-none ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
-                  )}
-                >
-                  <div className="prompt-scrollbar relative flex max-h-64 flex-col gap-0.5 overflow-y-auto">
-                    <div style={hoverStyle} className="absolute left-0 right-0 top-0 h-8 -z-10 rounded-xl bg-accent pointer-events-none" />
-                    {models.map((model, idx) => (
-                      <button
-                        key={model}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onMouseEnter={() => {
-                          setHoverStyle((prev) => ({
-                            opacity: 1,
-                            transform: `translateY(${idx * 34}px) scale(1)`,
-                            transition:
-                              prev.opacity === 0
-                                ? "opacity 0.15s ease-out"
-                                : "transform 0.3s cubic-bezier(0.175,0.885,0.32,1.275), opacity 0.15s ease",
-                          }));
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedModel(model);
-                          setIsModelSelectOpen(false);
-                        }}
-                        className="group relative flex h-8 w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-left text-xs font-medium text-foreground/80 outline-none active:scale-[0.98] cursor-default"
-                      >
-                        <span className="flex items-center gap-2">
-                          <ModelIcon model={model} className="size-3.5 opacity-85 group-hover:opacity-100 transition-opacity" />
-                          {model}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
               )}
 
@@ -798,6 +748,62 @@ export const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
                 <PlusIcon />
               </button>
             </div>
+
+            {/* Model menu. Rendered here — against the input card, which is
+                overflow-visible when expanded — rather than inside the action
+                bar above, which clips with overflow-hidden and swallowed the
+                popup entirely so no model could ever be picked. */}
+            {hideModelSelect ? null : (
+              <div
+                style={{ transformOrigin: "bottom left" }}
+                onMouseLeave={() => {
+                  setHoverStyle((prev) => ({
+                    ...prev,
+                    opacity: 0,
+                    transform: prev.transform.replace("scale(1)", "scale(0.95)"),
+                    transition: "opacity 0.2s ease-in, transform 0.2s ease-out",
+                  }));
+                }}
+                className={cn(
+                  "absolute bottom-12 left-3 z-50 w-44 max-w-[calc(100vw-3rem)] rounded-2xl border border-border bg-card/95 p-1 shadow-xl backdrop-blur-md flex flex-col gap-0.5 transition-all duration-300 cursor-default",
+                  isModelSelectOpen
+                    ? "opacity-100 scale-100 translate-y-0 pointer-events-auto ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+                    : "opacity-0 scale-95 translate-y-3 pointer-events-none ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
+                )}
+              >
+                <div className="prompt-scrollbar relative flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                  <div style={hoverStyle} className="absolute left-0 right-0 top-0 h-8 -z-10 rounded-xl bg-accent pointer-events-none" />
+                  {models.map((model, idx) => (
+                    <button
+                      key={model}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => {
+                        setHoverStyle((prev) => ({
+                          opacity: 1,
+                          transform: `translateY(${idx * 34}px) scale(1)`,
+                          transition:
+                            prev.opacity === 0
+                              ? "opacity 0.15s ease-out"
+                              : "transform 0.3s cubic-bezier(0.175,0.885,0.32,1.275), opacity 0.15s ease",
+                        }));
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedModel(model);
+                        setIsModelSelectOpen(false);
+                      }}
+                      className="group relative flex h-8 w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-left text-xs font-medium text-foreground/80 outline-none active:scale-[0.98] cursor-default"
+                    >
+                      <span className="flex items-center gap-2">
+                        <ModelIcon model={model} className="size-3.5 opacity-85 group-hover:opacity-100 transition-opacity" />
+                        {model}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button
               type="button"
