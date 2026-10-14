@@ -104,6 +104,10 @@ type Config struct {
 	// models what they can do so routing does not have to guess from the
 	// provider kind.
 	Detection DetectionConfig `yaml:"detection" json:"detection"`
+	// Benchmark governs the Autonomous Benchmark Engine. Disabled by default:
+	// when disabled no scheduler, worker or route is started and the gateway
+	// behaves exactly as before.
+	Benchmark BenchmarkConfig `yaml:"benchmark" json:"benchmark"`
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
 	Logging   LoggingConfig   `yaml:"logging" json:"logging"`
 	Admin     AdminConfig     `yaml:"admin" json:"admin"`
@@ -654,6 +658,49 @@ type DetectionConfig struct {
 	TimeoutPerModel Duration `yaml:"timeout_per_model" json:"timeout_per_model"`
 }
 
+// BenchmarkConfig governs the Autonomous Benchmark Engine.
+//
+// The engine is a fully independent, enterprise-grade module that continuously
+// benchmarks providers and models, stores every result permanently, and powers
+// a Grafana-style analytics dashboard. It is DISABLED by default and must
+// never affect gateway performance unless explicitly enabled via
+// ENABLE_BENCHMARK_ENGINE=true (or benchmark.enabled: true).
+//
+// Architecture when enabled:
+//
+//	Dashboard → Benchmark API → Scheduler → Redis Queue → Workers → Gateway → Providers → Database
+//
+// The module is self-contained (internal/benchmark) so it can later be
+// extracted into its own service or sold as a premium enterprise feature.
+type BenchmarkConfig struct {
+	// Enabled is the master switch. False (default) hides the Benchmark page,
+	// starts no scheduler or workers, and disables every benchmark API route.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// SchedulerEnabled gates the cron-style scheduler independently. It only
+	// takes effect when Enabled is true.
+	SchedulerEnabled bool `yaml:"scheduler_enabled" json:"scheduler_enabled"`
+	// Workers is the number of in-process benchmark workers. Workers also
+	// scale horizontally: every replica drains the same Redis queue.
+	Workers int `yaml:"workers" json:"workers"`
+	// QueueSize bounds the in-memory fallback queue when Redis is absent.
+	QueueSize int `yaml:"queue_size" json:"queue_size"`
+	// DefaultTimeout bounds a single benchmark probe, e.g. "60s".
+	DefaultTimeout Duration `yaml:"default_timeout" json:"default_timeout"`
+	// DefaultConcurrency caps simultaneous probes inside one run.
+	DefaultConcurrency int `yaml:"default_concurrency" json:"default_concurrency"`
+	// MaxDailyCostUSD is the global daily spend ceiling for benchmarks.
+	// 0 means unlimited; per-job ceilings still apply.
+	MaxDailyCostUSD float64 `yaml:"max_daily_cost_usd" json:"max_daily_cost_usd"`
+	// RetentionDays bounds pruning of benchmark results. 0 keeps everything
+	// forever (the default: results are never overwritten).
+	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+	// RedisQueueKey is the Redis list key for the benchmark queue.
+	RedisQueueKey string `yaml:"redis_queue_key" json:"redis_queue_key"`
+}
+
+// BenchmarkEnabled reports whether the engine may run at all.
+func (c BenchmarkConfig) BenchmarkEnabled() bool { return c.Enabled }
+
 // TelemetryConfig configures observability.
 type TelemetryConfig struct {
 	// ServiceName overrides app.name for OTel resource attributes.
@@ -914,6 +961,19 @@ func Default() *Config {
 			MaxModelsPerRun: 10,
 			Concurrency:     2,
 			TimeoutPerModel: Duration(90 * time.Second),
+		},
+		Benchmark: BenchmarkConfig{
+			// Disabled by default: zero impact on the inference gateway
+			// unless the operator opts in explicitly.
+			Enabled:            false,
+			SchedulerEnabled:   true,
+			Workers:            2,
+			QueueSize:          1000,
+			DefaultTimeout:     Duration(60 * time.Second),
+			DefaultConcurrency: 5,
+			MaxDailyCostUSD:    0,
+			RetentionDays:      0,
+			RedisQueueKey:      "benchmark:queue",
 		},
 		Telemetry: TelemetryConfig{
 			TracesEnabled:     true,
