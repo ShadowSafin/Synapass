@@ -58,6 +58,15 @@ type Repositories struct {
 	Pricing      *PricingRepository
 	BudgetAlerts *BudgetAlertRepository
 	Anomalies    *AnomalyRepository
+	// Autonomous Benchmark Engine (disabled by default; inert until enabled).
+	BenchmarkJobs          *BenchmarkJobRepository
+	BenchmarkDatasets      *BenchmarkDatasetRepository
+	BenchmarkPrompts       *BenchmarkPromptRepository
+	BenchmarkRuns          *BenchmarkRunRepository
+	BenchmarkResults       *BenchmarkResultRepository
+	BenchmarkReports       *BenchmarkReportRepository
+	BenchmarkNotifications *BenchmarkNotificationRepository
+	BenchmarkWorkerLogs    *BenchmarkWorkerLogRepository
 }
 
 // NewRepositories builds every repository over a pool.
@@ -103,6 +112,15 @@ func NewRepositories(pool *pgxpool.Pool, logger *slog.Logger) *Repositories {
 		Pricing:      NewPricingRepository(pool, logger),
 		BudgetAlerts: NewBudgetAlertRepository(pool, logger),
 		Anomalies:    NewAnomalyRepository(pool, logger),
+
+		BenchmarkJobs:          NewBenchmarkJobRepository(pool, logger),
+		BenchmarkDatasets:      NewBenchmarkDatasetRepository(pool, logger),
+		BenchmarkPrompts:       NewBenchmarkPromptRepository(pool, logger),
+		BenchmarkRuns:          NewBenchmarkRunRepository(pool, logger),
+		BenchmarkResults:       NewBenchmarkResultRepository(pool, logger),
+		BenchmarkReports:       NewBenchmarkReportRepository(pool, logger),
+		BenchmarkNotifications: NewBenchmarkNotificationRepository(pool, logger),
+		BenchmarkWorkerLogs:    NewBenchmarkWorkerLogRepository(pool, logger),
 	}
 }
 
