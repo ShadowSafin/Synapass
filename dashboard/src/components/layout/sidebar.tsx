@@ -27,12 +27,13 @@ import {
   Users,
   BookKey,
   Wrench,
+  GaugeCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import * as React from 'react';
 
-import { useCurrentUser, useProviderHealth } from '@/hooks/use-admin';
+import { useBenchmarkStatus, useCurrentUser, useProviderHealth } from '@/hooks/use-admin';
 import { cn } from '@/lib/utils';
 
 export function SidebarBrand({ compact = false }: { compact?: boolean }) {
@@ -105,8 +106,7 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { href: '/cost', label: 'Cost', icon: CircleDollarSign, hint: 'Exact spend, budgets, forecasts and savings' },
       { href: '/requests', label: 'Requests', icon: ScrollText, hint: 'Per-request log with routing detail' },
     ],
-  },
-  {
+  },  {
     title: 'Inference',
     items: [
       { href: '/providers', label: 'Providers', icon: Cpu, hint: 'Upstream endpoints and their health' },
@@ -168,6 +168,7 @@ const MORE_ITEMS: NavItem[] = [
 export function Sidebar({ onNavigate, inDrawer = false }: { onNavigate?: () => void; inDrawer?: boolean }) {
   const pathname = usePathname();
   const { data: health } = useProviderHealth();
+  const { data: benchStatus } = useBenchmarkStatus();
   const [moreOpen, setMoreOpen] = React.useState(() => MORE_ITEMS.some((item) => item.href === pathname));
 
   React.useEffect(() => {
@@ -176,15 +177,30 @@ export function Sidebar({ onNavigate, inDrawer = false }: { onNavigate?: () => v
 
   const unhealthy = (health ?? []).filter((h) => h.state === 'unhealthy' || h.state === 'degraded').length;
 
+  // The Benchmark entry appears when the dashboard is built with the feature
+  // flag OR the engine is enabled at runtime (e.g. from the Benchmark page
+  // itself), so enabling never requires a dashboard rebuild. Disabled by
+  // default: the query fails closed to hidden.
+  const showBenchmark =
+    process.env.NEXT_PUBLIC_ENABLE_BENCHMARK_ENGINE === 'true' || benchStatus?.enabled === true;
+  const benchmarkItem: NavItem = {
+    href: '/benchmark',
+    label: 'Benchmark',
+    icon: GaugeCircle,
+    hint: 'Continuous provider benchmarking, health and reports',
+  };
+
   const sections = React.useMemo(
     () =>
       SECTIONS.map((section) => ({
         ...section,
-        items: section.items.map((item) =>
-          item.href === '/providers' && unhealthy > 0 ? { ...item, badge: unhealthy, badgeAlert: true } : item,
-        ),
+        items: section.items
+          .map((item) =>
+            item.href === '/providers' && unhealthy > 0 ? { ...item, badge: unhealthy, badgeAlert: true } : item,
+          )
+          .concat(section.title === 'Workspace' && showBenchmark ? [benchmarkItem] : []),
       })),
-    [unhealthy],
+    [unhealthy, showBenchmark],
   );
 
   const isActive = (href: string) => pathname === href;
