@@ -193,7 +193,7 @@ func (p *Postgres) Migrate(ctx context.Context) (*MigrationResult, error) {
 	result := &MigrationResult{}
 	for _, migration := range migrations {
 		if existing, ok := applied[migration.Version]; ok {
-			if existing != migration.Checksum {
+			if !checksumMatches(existing, migration.SQL) {
 				return nil, domain.Errorf(domain.ErrCodeInternal,
 					"migration %s was modified after it was applied (recorded %s, found %s); "+
 						"create a new migration instead of editing an applied one",

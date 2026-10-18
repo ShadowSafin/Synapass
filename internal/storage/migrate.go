@@ -66,7 +66,6 @@ func LoadMigrations(fsys fs.FS, dir string) ([]Migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read migration %q: %w", entry.Name(), err)
 		}
-		sum := sha256.Sum256(content)
 		base := strings.TrimSuffix(entry.Name(), ".sql")
 		version, name, _ := strings.Cut(base, "_")
 
@@ -74,12 +73,45 @@ func LoadMigrations(fsys fs.FS, dir string) ([]Migration, error) {
 			Version:  version,
 			Name:     name,
 			SQL:      string(content),
-			Checksum: hex.EncodeToString(sum[:]),
+			Checksum: migrationChecksum(content),
 		})
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	return out, nil
+}
+
+// migrationChecksum hashes a migration with line endings normalized to LF.
+//
+// The checksum exists to catch a migration edited after it was applied. Line
+// endings are not part of that edit: the same commit is checked out with CRLF
+// on a Windows host with autocrlf enabled, so a byte-exact hash reports every
+// such checkout as a modified migration and refuses to start. Normalizing
+// keeps the check about the SQL rather than about the platform that wrote it.
+func migrationChecksum(content []byte) string {
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
+}
+
+// checksumMatches reports whether a recorded checksum describes this migration.
+//
+// New records use migrationChecksum, but a migration applied by an older build
+// was hashed exactly as checked out, which differs between LF and CRLF hosts for
+// the same commit. Both of those legacy forms are accepted so an upgrade does
+// not demand a database patch; anything else is still a real modification.
+func checksumMatches(recorded, sql string) bool {
+	if recorded == migrationChecksum([]byte(sql)) {
+		return true
+	}
+	normalized := strings.ReplaceAll(sql, "\r\n", "\n")
+	for _, form := range []string{sql, strings.ReplaceAll(normalized, "\n", "\r\n")} {
+		sum := sha256.Sum256([]byte(form))
+		if recorded == hex.EncodeToString(sum[:]) {
+			return true
+		}
+	}
+	return false
 }
 
 // PostgresMigrations returns the embedded PostgreSQL migrations.
