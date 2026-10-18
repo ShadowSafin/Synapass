@@ -61,3 +61,6 @@ desktop/dist/
 desktop/internal/payload/files/*
 !desktop/internal/payload/files/.keep
 *.syso
+
+# Local desktop installer scratch state (machine-specific paths)
+desktop/tmp-*.json

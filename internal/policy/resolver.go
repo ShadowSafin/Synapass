@@ -156,17 +156,26 @@ func (r *Resolver) Resolve(ctx context.Context, rc *domain.RequestContext) (*dom
 
 	// A key pinned to a specific policy short-circuits matching entirely: the
 	// operator made an explicit choice and nothing should override it.
+	//
+	// Pinning an id is not, however, a grant to use it. A policy that names
+	// tenants, keys or endpoints only governs those subjects, so a caller that
+	// knows another tenant's policy id must fall through to its own matching
+	// rules rather than borrowing that policy's targets, budgets and cache
+	// settings. UUIDs are unguessable but they appear in logs, exports and
+	// support tickets, so secrecy is not the control.
 	if rc.PolicyID != "" {
-		if p := findByID(policies, rc.PolicyID); p != nil && p.Enabled {
+		if p := findByID(policies, rc.PolicyID); p != nil && p.Enabled && pinnedPolicyApplies(p, rc) {
 			return p, nil
 		}
 		if p, err := r.source.GetPolicy(ctx, rc.PolicyID); err == nil && p != nil {
 			p.Normalize()
-			return p, nil
+			if p.Enabled && pinnedPolicyApplies(p, rc) {
+				return p, nil
+			}
 		}
 	}
 	if rc.APIKey != nil && rc.APIKey.RoutingPolicyID != "" {
-		if p := findByID(policies, rc.APIKey.RoutingPolicyID); p != nil && p.Enabled {
+		if p := findByID(policies, rc.APIKey.RoutingPolicyID); p != nil && p.Enabled && pinnedPolicyApplies(p, rc) {
 			return p, nil
 		}
 	}
@@ -227,6 +236,36 @@ func (r *Resolver) Get(ctx context.Context, id string) (*domain.RoutingPolicy, e
 	}
 	p.Normalize()
 	return p, nil
+}
+
+// pinnedPolicyApplies reports whether a policy referenced by id may govern this
+// request.
+//
+// Every populated scope on the policy must include the caller: a policy scoped
+// to tenant A is not usable by tenant B even when B knows its id, and the same
+// holds for key and endpoint grants. A policy with no subject scoping is a
+// genuinely global policy and remains pinnable by anyone, which is the
+// documented behaviour for operator-wide defaults.
+func pinnedPolicyApplies(p *domain.RoutingPolicy, rc *domain.RequestContext) bool {
+	if p == nil || rc == nil {
+		return false
+	}
+	if len(p.Match.TenantIDs) > 0 {
+		if rc.Tenant == nil || !containsString(p.Match.TenantIDs, rc.Tenant.ID) {
+			return false
+		}
+	}
+	if len(p.Match.APIKeyIDs) > 0 {
+		if rc.APIKey == nil || !containsString(p.Match.APIKeyIDs, rc.APIKey.ID) {
+			return false
+		}
+	}
+	if len(p.Match.EndpointIDs) > 0 {
+		if rc.EndpointID == "" || !containsString(p.Match.EndpointIDs, rc.EndpointID) {
+			return false
+		}
+	}
+	return true
 }
 
 // findByID looks up a policy in a slice.

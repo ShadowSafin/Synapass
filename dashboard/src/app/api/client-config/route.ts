@@ -1,6 +1,7 @@
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-import { GATEWAY_URL } from '@/lib/gateway';
+import { GATEWAY_URL, verifySession } from '@/lib/gateway';
 
 /**
  * Public client configuration.
@@ -14,13 +15,25 @@ import { GATEWAY_URL } from '@/lib/gateway';
  * current LAN address from the hostname it used to load the dashboard — a
  * fixed env IP goes stale every time the machine changes networks. The admin
  * key never leaves the server: only URLs are returned.
+ *
+ * The LAN address is disclosed only to a signed-in operator. The login and
+ * setup pages never need it, and its only value to an anonymous caller is
+ * mapping the internal network the gateway lives on.
  */
 export async function GET() {
   const lanUrl = process.env.GATEWAY_LAN_URL ?? '';
+
+  const jar = await cookies();
+  const cookie = jar
+    .getAll()
+    .map((entry) => `${entry.name}=${entry.value}`)
+    .join('; ');
+  const authenticated = await verifySession(cookie);
+
   return NextResponse.json({
     gateway_url: GATEWAY_URL,
-    lan_url: lanUrl,
     gateway_port: publicGatewayPort(lanUrl),
+    ...(authenticated ? { lan_url: lanUrl } : {}),
   });
 }
 

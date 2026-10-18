@@ -276,6 +276,11 @@ func (s *Service) Login(ctx context.Context, username, password string, client C
 
 	if user.Locked(now) {
 		_, _ = VerifyPassword(password, user.PasswordHash)
+		// Count the attempt even though the lockout already rejected it.
+		// Otherwise the failure counter freezes at the threshold and every
+		// later round is locked out for the base duration instead of the
+		// escalating one, which hands an attacker a predictable window.
+		s.recordFailure(ctx, user, now)
 		return nil, ErrAccountLocked
 	}
 

@@ -4,15 +4,27 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+)
+
+const (
+	// maxArchiveBytes bounds a downloaded distribution. A real PostgreSQL
+	// binary archive is tens of megabytes; the cap exists so a hostile or
+	// misconfigured mirror cannot exhaust memory before verification.
+	maxArchiveBytes = 512 << 20
+	// maxChecksumBytes bounds the .sha256 sidecar. It is a single line.
+	maxChecksumBytes = 4 << 10
+	// downloadTimeout bounds the whole transfer. Without a timeout a stalled
+	// mirror blocks application startup forever.
+	downloadTimeout = 10 * time.Minute
 )
 
 // RemoteFetchStrategy provides a strategy to fetch a Postgres binary so that it is available for use.
@@ -32,51 +44,97 @@ func defaultRemoteFetchStrategy(remoteFetchHost string, versionStrategy VersionS
 			architecture,
 			version)
 
-		jarDownloadResponse, err := http.Get(jarDownloadURL)
+		client := &http.Client{Timeout: downloadTimeout}
+
+		jarDownloadResponse, err := client.Get(jarDownloadURL)
 		if err != nil {
 			return fmt.Errorf("unable to connect to %s", remoteFetchHost)
 		}
-
-		defer closeBody(jarDownloadResponse)()
+		defer closeBody(jarDownloadResponse)
 
 		if jarDownloadResponse.StatusCode != http.StatusOK {
 			return fmt.Errorf("no version found matching %s", version)
 		}
 
-		jarBodyBytes, err := io.ReadAll(jarDownloadResponse.Body)
+		jarBodyBytes, err := readCapped(jarDownloadResponse.Body, maxArchiveBytes)
 		if err != nil {
 			return errorFetchingPostgres(err)
 		}
 
+		// Verification is mandatory, not best effort. A mirror that omits the
+		// sidecar, returns a 404, or truncates it must fail the install: the
+		// archive is extracted and executed, so "no checksum" cannot mean "no
+		// check". The old code silently skipped verification in exactly those
+		// cases, which is what turned a compromised mirror into code execution.
 		shaDownloadURL := fmt.Sprintf("%s.sha256", jarDownloadURL)
-		shaDownloadResponse, err := http.Get(shaDownloadURL)
+		shaDownloadResponse, err := client.Get(shaDownloadURL)
 		if err != nil {
-			return fmt.Errorf("download sha256 from %s failed: %w", shaDownloadURL, err)
+			return fmt.Errorf("checksum for %s is required but could not be downloaded: %w", jarDownloadURL, err)
 		}
-		defer closeBody(shaDownloadResponse)()
+		defer closeBody(shaDownloadResponse)
 
-		if err == nil && shaDownloadResponse.StatusCode == http.StatusOK {
-			if shaBodyBytes, err := io.ReadAll(shaDownloadResponse.Body); err == nil {
-				jarChecksum := sha256.Sum256(jarBodyBytes)
-				if !bytes.Equal(shaBodyBytes, []byte(hex.EncodeToString(jarChecksum[:]))) {
-					return errors.New("downloaded checksums do not match")
-				}
-			}
+		if shaDownloadResponse.StatusCode != http.StatusOK {
+			return fmt.Errorf("checksum for %s is required but the server returned %s",
+				jarDownloadURL, shaDownloadResponse.Status)
+		}
+
+		shaBodyBytes, err := readCapped(shaDownloadResponse.Body, maxChecksumBytes)
+		if err != nil {
+			return fmt.Errorf("read checksum for %s: %w", jarDownloadURL, err)
+		}
+		expected, err := parseChecksum(shaBodyBytes)
+		if err != nil {
+			return fmt.Errorf("checksum for %s is invalid: %w", jarDownloadURL, err)
+		}
+		actual := sha256.Sum256(jarBodyBytes)
+		if subtle.ConstantTimeCompare(expected, []byte(hex.EncodeToString(actual[:]))) != 1 {
+			return fmt.Errorf("downloaded checksum does not match for %s", jarDownloadURL)
 		}
 
 		return decompressResponse(jarBodyBytes, jarDownloadResponse.ContentLength, cacheLocator, jarDownloadURL)
 	}
 }
 
-func closeBody(resp *http.Response) func() {
-	return func() {
-		if resp == nil || resp.Body == nil {
-			return
-		}
-		if err := resp.Body.Close(); err != nil {
-			log.Fatal(err)
-		}
+// readCapped reads at most limit bytes and fails when the source is larger, so
+// a hostile response cannot exhaust memory before it is verified.
+func readCapped(r io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
 	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("response exceeded the %d byte limit", limit)
+	}
+	return body, nil
+}
+
+// parseChecksum accepts the two formats checksum files are published in:
+// the bare digest, and "<digest>  <filename>". Anything that is not a 64-hex
+// SHA-256 digest is rejected rather than compared loosely.
+func parseChecksum(body []byte) ([]byte, error) {
+	fields := strings.Fields(string(body))
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("checksum file is empty")
+	}
+	digest := strings.ToLower(fields[0])
+	if len(digest) != sha256.Size*2 {
+		return nil, fmt.Errorf("checksum is not a sha256 digest")
+	}
+	decoded, err := hex.DecodeString(digest)
+	if err != nil {
+		return nil, fmt.Errorf("checksum is not hexadecimal")
+	}
+	return decoded, nil
+}
+
+// closeBody closes a response body without terminating the process. A close
+// error on a fully read body carries no actionable information, and the previous
+// log.Fatal here turned a normal cleanup failure into an application exit.
+func closeBody(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	_ = resp.Body.Close()
 }
 
 func decompressResponse(bodyBytes []byte, contentLength int64, cacheLocator CacheLocator, downloadURL string) error {

@@ -22,6 +22,13 @@ param(
   [string]$Dist = (Join-Path $PSScriptRoot "dist"),
   [string]$NodeMajor = "22"
 )
+if (-not $PSScriptRoot) {
+  $RepoPath =Split-Path $MyInvocation.MyCommand.Definition -Parent
+  if ($RepoPath -and (Test-Path (Join-Path $RepoPath "build.ps1")) ) {
+    $PSScriptRoot = $RepoPath
+    $Dist = (Join-Path $PSScriptRoot "dist")
+  }
+}
 
 $ErrorActionPreference = "Stop"
 $Desktop = $PSScriptRoot
@@ -51,17 +58,10 @@ try { $stamp += "_" + (git -C $Repo rev-parse --short HEAD 2>$null) } catch {}
 # VERSIONINFO needs numeric components, so a tag is used when there is one and a
 # date-derived build number otherwise. An unstamped local build is deliberately
 # 0.0.0.<date> rather than a guessed release number.
-$major = 0; $minor = 0; $patch = 0
-$tag = $null
-try {
-  # `git tag --list` exits 0 on an untagged repo, while `git describe --tags`
-  # writes to stderr and would abort the build under ErrorActionPreference Stop.
-  $existing = @(git -C $Repo tag --list 2>$null)
-  if ($existing.Count -gt 0) { $tag = (git -C $Repo describe --tags --abbrev=0 2>$null) }
-} catch { $tag = $null }
-if ("$tag" -match '^v?(\d+)\.(\d+)\.(\d+)') {
-  $major = [int]$Matches[1]; $minor = [int]$Matches[2]; $patch = [int]$Matches[3]
-}
+# 
+# For this build the requested desktop version is V1.0.0, so the version fields
+# are fixed instead of derived from git tags or from the build date.
+$major = 1; $minor = 0; $patch = 0
 $build = [int](Get-Date -Format "yyyyMMdd")
 $fileVersion = "$major.$minor.$patch.$build"
 

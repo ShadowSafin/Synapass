@@ -1238,6 +1238,27 @@ func (c *Config) IsProduction() bool {
 }
 
 // IsDevelopment reports whether relaxed development conveniences apply.
+//
+// This is deliberately narrower than "not production". A staging deployment is
+// reachable by real clients and often holds real data; treating it as
+// development kept anonymous inference and a wildcard CORS policy legal there.
+// Only an explicitly local environment gets those affordances.
 func (c *Config) IsDevelopment() bool {
-	return !c.IsProduction()
+	switch strings.ToLower(strings.TrimSpace(c.App.Environment)) {
+	case "development", "dev", "test", "":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsStaging reports whether the environment is staging. It exists so checks
+// that care about "not production but not local either" stay readable.
+func (c *Config) IsStaging() bool {
+	switch strings.ToLower(strings.TrimSpace(c.App.Environment)) {
+	case "staging", "stage":
+		return true
+	default:
+		return false
+	}
 }

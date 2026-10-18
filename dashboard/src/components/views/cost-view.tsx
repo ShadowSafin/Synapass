@@ -57,6 +57,7 @@ import {
   formatPercent,
   formatTime,
 } from '@/lib/format';
+import { bucketLabels } from '@/lib/metrics';
 import type { BudgetStatus, CostDimensionRow, CostRecord } from '@/lib/types';
 
 function UrlFilterSelect({
@@ -196,8 +197,11 @@ export function CostView() {
     return map;
   }, [tenants]);
 
+  // Cost points carry no interval: the gateway truncates by hour for a day and
+  // by day for a week or a month. bucketLabels infers the width from the point
+  // spacing, so a 7d/30d axis is labelled by date instead of a repeated time.
   const labels = React.useMemo(
-    () => (series.data?.series ?? []).map((p) => formatTime(p.bucket)),
+    () => bucketLabels((series.data?.series ?? []).map((p) => ({ start: p.bucket }))),
     [series.data],
   );
   const actualSeries = React.useMemo(

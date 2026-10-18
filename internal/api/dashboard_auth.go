@@ -112,19 +112,26 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := s.clientInfo(r)
+	if ok, retry := s.authThrottle.allow(client.IP); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+		writeError(w, domain.NewError(domain.ErrCodeRateLimited, "too many attempts; try again shortly"), nil)
+		return
+	}
+
 	var body setupRequest
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, domain.NewError(domain.ErrCodeInvalidRequest, "the request body is not valid JSON"), nil)
 		return
 	}
 
-	result, err := s.dashboardAuth.Setup(r.Context(), body.Username, body.Password, body.Confirm,
-		s.clientInfo(r))
+	result, err := s.dashboardAuth.Setup(r.Context(), body.Username, body.Password, body.Confirm, client)
 	if err != nil {
 		s.writeAuthError(w, r, err, "setup")
 		return
 	}
 
+	s.authThrottle.reset(client.IP)
 	s.setSessionCookie(w, r, result)
 	s.recordAuthOutcome("setup_success", "")
 
@@ -140,18 +147,26 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := s.clientInfo(r)
+	if ok, retry := s.authThrottle.allow(client.IP); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+		writeError(w, domain.NewError(domain.ErrCodeRateLimited, "too many attempts; try again shortly"), nil)
+		return
+	}
+
 	var body loginRequest
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, domain.NewError(domain.ErrCodeInvalidRequest, "the request body is not valid JSON"), nil)
 		return
 	}
 
-	result, err := s.dashboardAuth.Login(r.Context(), body.Username, body.Password, s.clientInfo(r))
+	result, err := s.dashboardAuth.Login(r.Context(), body.Username, body.Password, client)
 	if err != nil {
 		s.writeAuthError(w, r, err, "login")
 		return
 	}
 
+	s.authThrottle.reset(client.IP)
 	s.setSessionCookie(w, r, result)
 	s.recordAuthOutcome("login_success", result.User.Username)
 

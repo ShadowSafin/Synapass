@@ -1,10 +1,11 @@
 package admin
 
 import (
-	"net/url"
+	"context"
 	"strings"
 
 	"github.com/shadowsafin/synapass/internal/domain"
+	"github.com/shadowsafin/synapass/internal/netguard"
 )
 
 // Validation caps keep admin writes sane and the error messages actionable.
@@ -51,10 +52,14 @@ func ValidateProvider(p *domain.Provider) error {
 	if len(p.BaseURL) > maxURLLength {
 		return domain.NewError(domain.ErrCodeInvalidRequest, "provider base_url exceeds 2048 characters")
 	}
-	u, err := url.Parse(p.BaseURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	// Structural validation plus the provider address policy: loopback and
+	// private ranges stay available for self-hosted runtimes, while link-local
+	// and cloud-metadata destinations are refused. Provider probe, test and
+	// sync-model endpoints all connect to this URL with the stored credential,
+	// so a base_url is an SSRF sink if it is not constrained here.
+	if _, err := netguard.ValidateProviderURL(context.Background(), p.BaseURL); err != nil {
 		return domain.Errorf(domain.ErrCodeInvalidRequest,
-			"provider base_url must be an http(s) URL, e.g. https://api.openai.com/v1")
+			"provider base_url must be an http(s) URL, e.g. https://api.openai.com/v1 (%v)", err)
 	}
 	if p.AuthStyle != "" {
 		switch p.AuthStyle {

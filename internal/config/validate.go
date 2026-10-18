@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -97,8 +98,10 @@ func (c *Config) validateHTTP(v *ValidationError) {
 			c.HTTP.WriteTimeout.Std(), c.HTTP.ReadTimeout.Std())
 	}
 	for _, p := range c.HTTP.CORSAllowedOrigins {
-		if p == "*" && c.IsProduction() {
-			v.add("http.cors_allowed_origins contains \"*\" in a production environment")
+		// A wildcard is a development-only affordance. Staging is deployed, so
+		// it does not qualify; the middleware enforces the same rule.
+		if p == "*" && !c.IsDevelopment() {
+			v.add("http.cors_allowed_origins contains \"*\"; a wildcard is only permitted in a local development environment")
 		}
 	}
 }
@@ -198,8 +201,8 @@ func (c *Config) validateAuth(v *ValidationError) {
 	if c.Auth.CacheTTL > 5*60*1e9 {
 		v.add("auth.cache_ttl %s is long; a revoked key would keep working for that long", c.Auth.CacheTTL.Std())
 	}
-	if c.IsProduction() && c.Auth.AllowAnonymousTenant != "" {
-		v.add("auth.allow_anonymous_tenant must not be set in production")
+	if !c.IsDevelopment() && c.Auth.AllowAnonymousTenant != "" {
+		v.add("auth.allow_anonymous_tenant must not be set outside a local development environment")
 	}
 }
 
@@ -348,11 +351,17 @@ func (c *Config) validateAdmin(v *ValidationError) {
 	if c.Admin.Enabled && c.Admin.RequireScope && c.Auth.AdminKey == "" && c.IsProduction() {
 		v.add("admin.require_scope is true but no bootstrap admin key is configured (set SYNAPASS_ADMIN_KEY)")
 	}
-	// The shipped placeholder (.env.example, compose defaults) is non-empty on
-	// purpose so an unmodified copy boots far enough to fail loudly -- but it
-	// must never administer a production install. Outside production (an
-	// explicit local evaluation) it is tolerated.
-	if c.IsProduction() && isPlaceholderAdminKey(c.Auth.AdminKey) {
+	// The shipped placeholder (.env.example, compose defaults) is a published
+	// credential: anyone who can read the repository knows it. It is tolerated
+	// only for a local development evaluation, where the gateway is expected to
+	// be reachable by nothing but its own machine. Staging counts as deployed,
+	// not local — that distinction is the fix: "not production" used to include
+	// staging, so a staging deployment booted with a public key.
+	//
+	// The opt-in exists for CI harnesses that must exercise the compose file
+	// verbatim; it is an environment variable rather than a config field so it
+	// cannot be committed into a deployment's config.yaml by accident.
+	if isPlaceholderAdminKey(c.Auth.AdminKey) && !c.IsDevelopment() && !allowPlaceholderAdminKey() {
 		v.add("auth admin key is the shipped placeholder; generate a real one (openssl rand -hex 24) and set SYNAPASS_ADMIN_KEY")
 	}
 }
@@ -360,6 +369,17 @@ func (c *Config) validateAdmin(v *ValidationError) {
 // PlaceholderAdminKey is the value shipped in .env.example and the compose
 // defaults. Kept in one place so validation, tests and docs cannot drift.
 const PlaceholderAdminKey = "syn_admin_change_me_in_production_000000"
+
+// allowPlaceholderAdminKey reports whether the operator explicitly opted into
+// the published placeholder key for a non-local environment.
+func allowPlaceholderAdminKey() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
 
 // isPlaceholderAdminKey reports whether a key is a shipped placeholder rather
 // than a real credential. The exact constant plus the family prefix are both

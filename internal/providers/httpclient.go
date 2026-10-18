@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shadowsafin/synapass/internal/domain"
+	"github.com/shadowsafin/synapass/internal/netguard"
 )
 
 // Options configures adapter construction. All fields are optional; the zero
@@ -67,10 +68,13 @@ func NewHTTPClient(timeouts domain.TimeoutPolicy) *http.Client {
 		Timeout:   timeouts.Connect,
 		KeepAlive: 30 * time.Second,
 	}
-
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		Proxy: http.ProxyFromEnvironment,
+		// The dialer resolves once and connects only to an address that passed
+		// the provider policy. Loopback and private runtimes remain reachable;
+		// link-local addresses (cloud instance metadata) never are, even if the
+		// provider's hostname is re-pointed after it was validated.
+		DialContext:           netguard.DialContext(dialer, netguard.IsBlockedProviderIP),
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          256,
 		MaxIdleConnsPerHost:   64,

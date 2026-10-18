@@ -580,11 +580,15 @@ func (s *Server) handleAdminCreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopes := body.Scopes
-	if len(scopes) == 0 {
-		// A key with no explicit scopes defaults to inference only, which is the
-		// least-privilege choice for the overwhelmingly common case.
-		scopes = []string{string(domain.ScopeInference)}
+	// Validate the scope set and confine it to what the caller holds. A key with
+	// no explicit scopes defaults to inference only, which is the least-privilege
+	// choice for the overwhelmingly common case. An invalid or over-broad grant
+	// must be rejected before anything is written: a stored key is a credential
+	// that outlives the request that created it.
+	scopes, err := normalizeGrantedScopes(ctx, body.Scopes)
+	if err != nil {
+		writeError(w, err, metaFromContext(rc, nil))
+		return
 	}
 
 	key := &domain.APIKey{

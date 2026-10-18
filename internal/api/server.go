@@ -187,6 +187,11 @@ type Server struct {
 	// dashboardAuth authenticates console operators. Nil disables the surface.
 	dashboardAuth *dashboardauth.Service
 
+	// authThrottle bounds login/setup attempts per client address. The account
+	// lockout is the precise control; this is the backstop that keeps a stream
+	// of attempts from turning into an unbounded Argon2id workload.
+	authThrottle *loginThrottle
+
 	// benchmark is the Autonomous Benchmark Engine. Nil disables the surface.
 	benchmark *benchmark.Engine
 
@@ -246,6 +251,7 @@ func NewServer(deps Deps) (*Server, error) {
 		benchmark:     deps.Benchmark,
 		startedAt:     deps.StartedAt,
 		priceCache:    cost.NewPriceCache(priceCacheTTL),
+		authThrottle:  newLoginThrottle(),
 	}
 
 	// The replay runner needs the request logs, the captured prompts, the
@@ -335,7 +341,11 @@ func (s *Server) buildRouter() http.Handler {
 	r.Use(s.recoverMiddleware)
 	r.Use(s.identityMiddleware)
 	r.Use(s.corsMiddleware)
-	r.Use(chimw.RealIP)
+	// Deliberately no chimw.RealIP: it rewrites r.RemoteAddr from
+	// X-Forwarded-For for every caller, which makes the peer address a
+	// client-supplied value. The trusted-proxy logic in clientIP (and in
+	// cookieSecure) already honours the header only from configured proxies,
+	// and it needs the real peer to decide whether the header is trustworthy.
 	r.Use(chimw.Compress(5))
 
 	// Probe endpoints are unauthenticated by design: a load balancer cannot present
@@ -661,52 +671,92 @@ func (s *Server) adminMiddleware(next http.Handler) http.Handler {
 
 // adminScopeFor picks the scope an administrative route requires.
 //
-// Model writes are governed by the providers scope: models cannot exist
-// without a provider, and splitting them into a separate grant would force
-// every operator to hold two scopes for one workflow. Model reads keep the
-// historical usage:read grant so existing read-only integrations do not break.
+// The decision is made from the first path segment after /admin/v1, not from a
+// substring search. Substring matching produced real mis-grants: "/tool-policies"
+// matched "/policies" first and required only the routing-policy scope, so a
+// policy admin could rewrite what the gateway is allowed to execute, while
+// "/cache/policies" was indistinguishable from a routing policy by accident
+// rather than by decision. Segment matching makes each route's grant explicit and
+// keeps a future route named e.g. "/policies-export" from inheriting the wrong
+// scope.
+//
+// Model writes are governed by the providers scope: models cannot exist without
+// a provider, and splitting them into a separate grant would force every operator
+// to hold two scopes for one workflow. Model reads keep the historical
+// usage:read grant so existing read-only integrations do not break.
 func adminScopeFor(method, path string) domain.Scope {
-	switch {
-	case strings.Contains(path, "/policies"):
+	segment, sub := adminPathSegments(path)
+
+	switch segment {
+	case "policies":
 		return domain.ScopeAdminPolicies
-	case strings.Contains(path, "/providers"):
-		return domain.ScopeAdminProviders
-	case strings.Contains(path, "/models"):
-		if method == http.MethodGet {
-			return domain.ScopeReadUsage
+	case "cache":
+		// Cache policies are policies; cache invalidation is a platform-wide
+		// destructive action with no narrower grant.
+		if sub == "policies" {
+			return domain.ScopeAdminPolicies
 		}
-		return domain.ScopeAdminProviders
-	case strings.Contains(path, "/keys"):
-		return domain.ScopeAdminKeys
-	case strings.Contains(path, "/tenants"):
-		return domain.ScopeAdminTenants
-	case strings.Contains(path, "/tunnels"):
-		// Tunnel creation can expose admin surfaces to the public internet,
-		// so reads stay on the read scope but every mutation requires full
-		// admin. There is no narrower grant for "may expose us publicly".
-		if method == http.MethodGet {
+		if method == http.MethodGet || method == http.MethodHead {
 			return domain.ScopeReadUsage
 		}
 		return domain.ScopeAdminAll
-	case strings.Contains(path, "/tools"), strings.Contains(path, "/tool-policies"):
+	case "providers":
+		return domain.ScopeAdminProviders
+	case "models":
+		if method == http.MethodGet || method == http.MethodHead {
+			return domain.ScopeReadUsage
+		}
+		return domain.ScopeAdminProviders
+	case "keys":
+		return domain.ScopeAdminKeys
+	case "tenants":
+		return domain.ScopeAdminTenants
+	case "tools", "tool-policies", "tool-invocations", "agent-runs", "overrides":
 		// Tool registry and tool policy share one scope: configuring what a tool
 		// is and who may call it are the same decision from a security view.
-		if method == http.MethodGet {
+		if method == http.MethodGet || method == http.MethodHead {
 			return domain.ScopeReadUsage
 		}
 		return domain.ScopeAdminProviders
-	case strings.Contains(path, "/tool-invocations"),
-		strings.Contains(path, "/agent-runs"),
-		strings.Contains(path, "/overrides"):
-		if method == http.MethodGet {
+	case "tunnels":
+		// Tunnel creation can expose admin surfaces to the public internet, so
+		// reads stay on the read scope but every mutation requires full admin.
+		// There is no narrower grant for "may expose us publicly".
+		if method == http.MethodGet || method == http.MethodHead {
 			return domain.ScopeReadUsage
 		}
-		return domain.ScopeAdminProviders
-	case method == http.MethodGet:
-		return domain.ScopeReadUsage
+		return domain.ScopeAdminAll
 	default:
+		if method == http.MethodGet || method == http.MethodHead {
+			return domain.ScopeReadUsage
+		}
 		return domain.ScopeAdminAll
 	}
+}
+
+// adminPathSegments splits a request path into the first segment after
+// /admin/v1 and the segment after it. A path outside the admin surface yields
+// empty strings, which fall through to the most restrictive default.
+func adminPathSegments(path string) (first, second string) {
+	var trimmed string
+	switch {
+	case strings.HasPrefix(path, "/admin/v1/"):
+		trimmed = strings.TrimPrefix(path, "/admin/v1/")
+	case path == "/admin/v1":
+		return "", ""
+	default:
+		return "", ""
+	}
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.Split(trimmed, "/")
+	first = parts[0]
+	if len(parts) > 1 {
+		second = parts[1]
+	}
+	return first, second
 }
 
 // observeAuthFailure records a credential rejection.

@@ -466,6 +466,7 @@ function paneInstall() {
 
 function paneFinish() {
   const r = state.result || {};
+  const closing = !!r.closeOnLaunch;
   return `<div class="hero">
     <div class="check enter" style="animation-delay:0ms">
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="hsl(142 60% 52%)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -477,7 +478,8 @@ function paneFinish() {
     <div class="r"><span class="k">Installed to</span><span class="v mono">${esc(r.installDir || state.opts.installDir)}</span></div>
     <div class="r"><span class="k">Data folder</span><span class="v mono">${esc(r.dataDir || state.opts.dataDir || state.opts.installDir)}</span></div>
     <div class="r"><span class="k">Administrator</span><span class="v">${esc(state.opts.adminUser || "—")}</span></div>
-  </div>`;
+  </div>
+  ${closing ? `<div class="banner enter" style="animation-delay:260ms">Setup is closing now so the app can take over.</div>` : ""}`;
 }
 
 const PANES = { welcome: paneWelcome, location: paneLocation, options: paneOptions, account: paneAccount, review: paneReview, install: paneInstall, finish: paneFinish };
@@ -609,6 +611,9 @@ async function next() {
       const appPath = workDir + "\\" + state.info.product + ".exe";
       const e = await syn_launch(appPath, workDir, rootDir);
       if (e) { toast(e); return; }
+      // The launcher returned cleanly and the app is starting. The installer
+      // will be told to close itself once the finish screen is shown.
+      return;
     }
     // The app owns the screen now. Leaving the wizard open on top of it looks
     // like a second app the user has to dismiss by hand.
@@ -678,6 +683,11 @@ window.__ar = {
     state.maxStep = state.step;
     render();
     $("scroll").scrollTop = 0;
+    if (result.closeOnLaunch) {
+      // The app is opening behind this wizard. Dismiss the setup window so the
+      // user is not left looking at the installer on top of the app.
+      setTimeout(() => { try { window.__ar && __ar.closeWindow && __ar.closeWindow(); } catch (e) {} }, 600);
+    }
   },
 };
 
@@ -688,6 +698,15 @@ $("cancel").addEventListener("click", async () => { await syn_close(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !state.installing && ["INPUT", "BUTTON"].indexOf(document.activeElement.tagName) === -1) { next(); }
 });
+
+// The Go side controls the real window close. The HTML side only asks for it
+// when the app has been launched and the wizard should step aside.
+window.__ar.closeWindow = () => {
+  // Re-run the same close path the wizard already uses on launch.
+  if (state.result && state.result.launched) {
+    syn_close().catch(() => {});
+  }
+};
 
 (async function boot() {
   try {

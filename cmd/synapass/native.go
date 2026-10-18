@@ -52,7 +52,7 @@ func addNativeFlags(fs *flag.FlagSet, opts *nativeOptions) {
 	fs.BoolVar(&opts.skipDashboard, "skip-dashboard", false, "gateway only: do not start or check the dashboard")
 	fs.BoolVar(&opts.consoleLogs, "console-logs", false, "stream child output to the terminal instead of log files")
 	fs.IntVar(&opts.dashboardPort, "dashboard-port", 0, "dashboard listen port (default 3000, PORT wins)")
-	fs.StringVar(&opts.dashboardHost, "dashboard-host", "", "dashboard bind address (default 0.0.0.0: localhost + LAN)")
+	fs.StringVar(&opts.dashboardHost, "dashboard-host", "", "dashboard bind address (default 127.0.0.1: this machine only; use 0.0.0.0 for LAN)")
 	fs.DurationVar(&opts.readinessTimeout, "readiness-timeout", 90*time.Second, "how long to wait for services to answer")
 }
 
@@ -505,6 +505,12 @@ func runNativeUp(_ *config.Config, _ *slog.Logger, configPath, logLevel, logForm
 	dashPort := dashboardPort(&opts)
 	dashHost := dashboardHost(&opts)
 
+	if !opts.skipDashboard && !dashboardHostIsLoopback(dashHost) {
+		fmt.Printf("WARNING: the dashboard is bound to %s. Until the first-run administrator is created,\n"+
+			"         anyone who can reach this port can claim that account — open the console and\n"+
+			"         complete setup now, or bind loopback with --dashboard-host 127.0.0.1.\n", dashHost)
+	}
+
 	children, err := nativeChildren(cfg, paths, &opts, gwPort, dashPort, dashHost)
 	if err != nil {
 		return err
@@ -763,12 +769,15 @@ func dashboardPort(opts *nativeOptions) int {
 	return 3000
 }
 
-// dashboardHost resolves the dashboard bind address, defaulting to all
-// interfaces so the console is reachable from other devices on the LAN
-// (http://<lan-ip>:3000) as well as from localhost. The dashboard requires a
-// console login, so LAN exposure is an authenticated surface — unlike the
-// gateway's unauthenticated inference endpoint. Pass --dashboard-host
-// 127.0.0.1 (or HOSTNAME=127.0.0.1) for loopback-only.
+// dashboardHost resolves the dashboard bind address, defaulting to loopback.
+//
+// The console is authenticated, but its first-run setup endpoint is not: until
+// an operator exists, whoever can reach the dashboard can create the account and
+// become the administrator. Binding to all interfaces by default therefore made
+// "install and open the console later" a race that a LAN attacker could win.
+// LAN access remains available and documented — it is now an explicit choice
+// (--dashboard-host 0.0.0.0 or HOSTNAME=0.0.0.0), which is also the point at
+// which the operator can be warned about the setup window.
 func dashboardHost(opts *nativeOptions) string {
 	if opts.dashboardHost != "" {
 		return opts.dashboardHost
@@ -776,7 +785,18 @@ func dashboardHost(opts *nativeOptions) string {
 	if host := os.Getenv("HOSTNAME"); host != "" {
 		return host
 	}
-	return "0.0.0.0"
+	return "127.0.0.1"
+}
+
+// dashboardHostIsLoopback reports whether a bind address keeps the console on
+// this machine. It accepts the loopback names Go resolves as loopback.
+func dashboardHostIsLoopback(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "", "127.0.0.1", "localhost", "::1", "[::1]":
+		return true
+	default:
+		return false
+	}
 }
 
 // dashDisplayHost maps a wildcard bind to a clickable address: 0.0.0.0 and ::

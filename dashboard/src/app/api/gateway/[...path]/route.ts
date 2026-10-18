@@ -43,9 +43,61 @@ interface RouteContext {
   params: Promise<{ path: string[] }>;
 }
 
+/** Methods that cannot change state and therefore do not need CSRF protection. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Reject state-changing requests that did not come from this console's origin.
+ *
+ * The session cookie is SameSite=Lax, which stops a cross-site form post but
+ * does not stop a request from another origin on the same site — a different
+ * port on 127.0.0.1 (a dev server, another local app) or on the same LAN host.
+ * That is enough to drive this proxy with the operator's live session, so the
+ * browser's own statement of origin is checked as well.
+ *
+ * A missing Origin is accepted because non-browser clients do not send one and
+ * cannot be CSRF'd; a browser always sends it on a state-changing request.
+ */
+function isSameOriginMutation(request: Request): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return false;
+  }
+  const origin = request.headers.get('origin');
+  // No Origin: a non-browser client (curl, server-side fetch). Browsers always
+  // send it on a state-changing request, and a client that cannot be CSRF'd
+  // does not need this check.
+  if (!origin) return true;
+
+  // Compare against the Host header, not request.url: the standalone Next
+  // server builds request.url from its listen address (0.0.0.0 inside the
+  // container), so an exact URL comparison would reject every real browser.
+  const host = request.headers.get('host');
+  if (!host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 async function handle(request: Request, context: RouteContext): Promise<NextResponse> {
   const { path } = await context.params;
   const route = path.join('/');
+  const method = request.method.toUpperCase();
+
+  if (!SAFE_METHODS.has(method) && !isSameOriginMutation(request)) {
+    return NextResponse.json(
+      {
+        error: {
+          message: 'cross-origin requests may not change administrative state',
+          type: 'permission_error',
+          code: 'cross_origin_rejected',
+        },
+      },
+      { status: 403, headers: { 'cache-control': 'no-store' } },
+    );
+  }
 
   if (!hasAdminKey()) {
     // Fail with an actionable message rather than a 401 from the gateway, which
@@ -87,10 +139,7 @@ async function handle(request: Request, context: RouteContext): Promise<NextResp
   }
 
   const search = new URL(request.url).search;
-  const target = `${route}${search}`;
-
-  const method = request.method.toUpperCase();
-  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
+  const target = `${route}${search}`;  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
 
   const result = await proxyAdmin(method, target, {
     body,

@@ -162,6 +162,32 @@ describe('bucketLabels', () => {
     expect(week[0]).not.toContain(':');
   });
 
+  it('infers day buckets from spacing when the points carry no interval', () => {
+    // The cost series reports only a bucket start, so the 7-day view arrives as
+    // daily points with no width. These must read as dates, not as a column of
+    // identical "00:00" labels that look like the 24-hour view.
+    const labels = bucketLabels([
+      { start: '2026-10-11T00:00:00Z' },
+      { start: '2026-10-12T00:00:00Z' },
+      { start: '2026-10-13T00:00:00Z' },
+    ]);
+    expect(labels).toHaveLength(3);
+    for (const label of labels) {
+      expect(label).toMatch(/Oct/);
+      expect(label).not.toContain(':');
+    }
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it('keeps time-of-day labels for hourly points with no interval', () => {
+    const labels = bucketLabels([
+      { start: '2026-10-11T04:00:00Z' },
+      { start: '2026-10-11T05:00:00Z' },
+    ]);
+    expect(labels[0]).toContain('04:00');
+    expect(labels[1]).toContain('05:00');
+  });
+
   it('keeps labels aligned with input order', () => {
     const labels = bucketLabels([
       bucket({ start: '2026-10-01T00:00:00Z', interval: '1h' }),

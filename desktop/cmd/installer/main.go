@@ -100,7 +100,7 @@ func main() {
 			os.Exit(2)
 		}
 		app := &installerApp{self: exe, silent: true}
-		app.runInstall(opts)
+		app.runInstallSilent(opts)
 		if !app.ok {
 			os.Exit(1)
 		}
@@ -123,9 +123,24 @@ func main() {
 
 	go func() {
 		<-app.quit
-		app.w.Terminate()
+		app.closeWindow()
 	}()
 	app.w.Run()
+}
+
+// closeWindow ends the wizard.
+//
+// It must reach the UI thread to do it. On Windows the backend stops the loop
+// with PostQuitMessage, which delivers WM_QUIT to the *calling* thread's message
+// queue; called straight from a background goroutine it posts onto a thread
+// that has no message loop, so the window never closes and setup appears to
+// hang after a successful install. Dispatch marshals the call onto the thread
+// that actually runs the loop.
+func (a *installerApp) closeWindow() {
+	if a.w == nil {
+		return
+	}
+	a.w.Dispatch(func() { a.w.Terminate() })
 }
 
 // installerApp bridges the wizard UI and the install pipeline. In --silent mode
@@ -254,7 +269,7 @@ func (a *installerApp) browse(initial string) string {
 func (a *installerApp) install(input string) string {
 	var opts installOptions
 	if err := json.Unmarshal([]byte(input), &opts); err != nil {
-		a.done(false, "The setup options could not be read.", "", "", false)
+		a.done(false, "The setup options could not be read.", "", "", false, false)
 		return ""
 	}
 	go a.runInstall(opts)
@@ -270,7 +285,7 @@ func (a *installerApp) runInstall(opts installOptions) {
 		rootDir = installDir
 	}
 	if installDir == "" {
-		a.done(false, "Choose an install folder to continue.", "", "", false)
+		a.done(false, "Choose an install folder to continue.", "", "", false, false)
 		return
 	}
 	stage := func(pct int, label string) { a.progress(pct, label) }
@@ -391,7 +406,144 @@ func (a *installerApp) runInstall(opts installOptions) {
 			launched = true
 		}
 	}
-	a.done(true, "", installDir, rootDir, launched)
+	// When the app will open after install, the installer should disappear so
+	// users do not sit on top of the app wondering whether setup is still going.
+	closeOnLaunch := launched && a.w != nil
+	a.done(true, "", installDir, rootDir, launched, closeOnLaunch)
+	if closeOnLaunch {
+		// The page closes itself once it has shown the finish screen, but the
+		// install worker owns the close as well: a wedged page or a raised dialog
+		// must not leave the wizard sitting on top of the app that just opened.
+		time.AfterFunc(3*time.Second, func() { a.close() })
+	}
+}
+
+// runInstallSilent is the unattended install pipeline. It reuses the same stages
+// as the windowed install but reports to stderr instead of the wizard.
+func (a *installerApp) runInstallSilent(opts installOptions) {
+	installDir := strings.TrimSpace(opts.InstallDir)
+	rootDir := strings.TrimSpace(opts.DataDir)
+	if rootDir == "" {
+		rootDir = installDir
+	}
+	if installDir == "" {
+		a.ok = false
+		fmt.Fprintln(os.Stderr, "Choose an install folder to continue.")
+		return
+	}
+	stage := func(pct int, label string) {
+		fmt.Fprintf(os.Stderr, "[%3d%%] %s\n", pct, label)
+	}
+
+	// 1) Folders.
+	stage(8, "Preparing folders")
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		a.fail("The install folder could not be created.", err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "logs"), 0o750); err != nil {
+		a.fail("The data folder could not be created.", err)
+		return
+	}
+	logger := openInstallLog(filepath.Join(rootDir, "logs", "install.log"))
+
+	// 2) Runtime: the gateway, node and dashboard the app runs on.
+	stage(20, "Installing the application files")
+	if err := payload.Extract(rootDir); err != nil {
+		a.fail("The application files could not be installed.", err)
+		return
+	}
+	appExe, err := payload.AppExecutable()
+	if err != nil {
+		a.fail("The application executable is missing from this installer.", err)
+		return
+	}
+	appPath := filepath.Join(installDir, appExeName)
+	if err := writeExecutable(appPath, appExe); err != nil {
+		a.fail("The application could not be installed.", err)
+		return
+	}
+	logf(logger, "installed %s and runtime under %s", appPath, rootDir)
+
+	// 3) Configuration. An existing native.env is preserved: regenerating its
+	// ports or database password would lock the app out of the database already
+	// there.
+	stage(36, "Writing configuration")
+	cfg := installConfig{installDir: installDir, rootDir: rootDir, dataDir: rootDir}
+	envPath := filepath.Join(rootDir, "native.env")
+	if _, err := os.Stat(envPath); err == nil {
+		existing, lerr := loadExistingConfig(installDir, rootDir)
+		if lerr != nil {
+			a.fail("The existing configuration could not be read.", lerr)
+			return
+		}
+		cfg = existing
+		logf(logger, "keeping the existing native.env (upgrade in place): gateway %d, dashboard %d, postgres %d", cfg.gwPort, cfg.dashPort, cfg.pgPort)
+	} else {
+		if cfg, err = allocateConfig(installDir, rootDir); err != nil {
+			a.fail("Could not pick local ports or generate secrets.", err)
+			return
+		}
+		if err := writeInstallConfig(cfg); err != nil {
+			a.fail("The configuration files could not be written.", err)
+			return
+		}
+		logf(logger, "wrote native.env and config.yaml (gateway %d, dashboard %d, postgres %d)", cfg.gwPort, cfg.dashPort, cfg.pgPort)
+	}
+	if !strings.EqualFold(installDir, rootDir) {
+		if err := os.WriteFile(filepath.Join(installDir, "root.txt"), []byte(rootDir), 0o644); err != nil {
+			a.fail("The data folder location could not be recorded.", err)
+			return
+		}
+	}
+
+	// 4) Database, migrations and the first administrator, all while the
+	// embedded database is up.
+	stage(46, "Checking the local services")
+	if busy := busyPort(cfg.pgPort, cfg.gwPort, cfg.dashPort); busy != "" {
+		a.fail("Synapass is already running.",
+			fmt.Errorf("%s is still in use; quit Synapass from its tray icon, then run setup again", busy))
+		return
+	}
+	stage(50, "Setting up the local database")
+	passwordFile := ""
+	if strings.TrimSpace(opts.AdminUser) != "" && opts.AdminPassword != "" {
+		passwordFile = filepath.Join(rootDir, "logs", ".admin-password")
+		if err := os.WriteFile(passwordFile, []byte(opts.AdminPassword), 0o600); err != nil {
+			a.fail("The administrator password could not be staged.", err)
+			return
+		}
+		defer os.Remove(passwordFile)
+	}
+	if err := a.provision(cfg, opts.AdminUser, passwordFile, logger); err != nil {
+		a.fail("The local database could not be set up.", err)
+		return
+	}
+	stage(76, "Database ready")
+
+	// 5) Shortcuts.
+	stage(84, "Creating shortcuts")
+	a.makeShortcuts(appPath, installDir, rootDir, opts, logger)
+
+	// 6) Uninstaller + registration.
+	stage(90, "Registering the application")
+	if err := os.WriteFile(filepath.Join(installDir, "uninstall.ps1"), uninstallScript, 0o644); err != nil {
+		logf(logger, "could not write uninstall.ps1: %v", err)
+	}
+	if err := a.registerUninstall(appPath, installDir, rootDir); err != nil {
+		logf(logger, "uninstall registration failed: %v", err)
+	}
+
+	// 7) Done.
+	stage(100, "Finished")
+	launched := false
+	if opts.LaunchAfter {
+		if err := a.launchInstalled(appPath, installDir, rootDir); err == nil {
+			launched = true
+		}
+	}
+	closeOnLaunch := launched && a.w != nil
+	a.done(true, "", installDir, rootDir, launched, closeOnLaunch)
 }
 
 // ---------------------------------------------------------------------------
@@ -699,7 +851,7 @@ func (a *installerApp) fail(summary string, err error) {
 	a.eval("window.__ar && __ar.onError(" + jsString(detail) + ")")
 }
 
-func (a *installerApp) done(ok bool, msg, installDir, dataDir string, launched bool) {
+func (a *installerApp) done(ok bool, msg, installDir, dataDir string, launched bool, closeOnLaunch bool) {
 	a.ok = ok
 	if a.silent {
 		if ok {
@@ -710,12 +862,13 @@ func (a *installerApp) done(ok bool, msg, installDir, dataDir string, launched b
 		return
 	}
 	out, _ := json.Marshal(map[string]any{
-		"ok":         ok,
-		"message":    msg,
-		"installDir": installDir,
-		"dataDir":    dataDir,
-		"launched":   launched,
-		"version":    payload.Version(),
+		"ok":            ok,
+		"message":       msg,
+		"installDir":    installDir,
+		"dataDir":       dataDir,
+		"launched":      launched,
+		"closeOnLaunch": closeOnLaunch,
+		"version":       payload.Version(),
 	})
 	a.eval("window.__ar && __ar.onDone(" + string(out) + ")")
 }

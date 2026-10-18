@@ -1630,6 +1630,14 @@ func (s *Server) handleAdminUpdateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A key may only be edited by a caller that holds everything the key holds:
+	// otherwise a keys:admin grant reaches the platform's full-admin key through
+	// a name or scope edit, which is the escalation H1 was about.
+	if err := requireKeyWithinCaller(ctx, existing); err != nil {
+		writeError(w, err, metaFromContext(rc, nil))
+		return
+	}
+
 	var body keyPatch
 	if err := decodeJSONBody(r, 1<<16, &body); err != nil {
 		writeError(w, err, metaFromContext(rc, nil))
@@ -1642,7 +1650,9 @@ func (s *Server) handleAdminUpdateKey(w http.ResponseWriter, r *http.Request) {
 		updated.Name = *body.Name
 	}
 	if body.Scopes != nil {
-		scopes, err := adminsvc.NormalizeKeyScopes(body.Scopes)
+		// Normalize *and* confine: updating a key is the same delegation
+		// decision as creating one.
+		scopes, err := normalizeGrantedScopes(ctx, body.Scopes)
 		if err != nil {
 			writeError(w, err, metaFromContext(rc, nil))
 			return
@@ -1703,6 +1713,14 @@ func (s *Server) handleAdminRotateKey(w http.ResponseWriter, r *http.Request) {
 	if existing == nil || existing.Status != domain.APIKeyActive {
 		writeError(w, domain.NewError(domain.ErrCodeNotFound, "active api key not found"),
 			metaFromContext(rc, nil))
+		return
+	}
+
+	// Rotation returns the target's plaintext. Without this containment check a
+	// narrow key-admin could rotate a more privileged key and receive its
+	// secret, which would make every scope check on create cosmetic.
+	if err := requireKeyWithinCaller(ctx, existing); err != nil {
+		writeError(w, err, metaFromContext(rc, nil))
 		return
 	}
 

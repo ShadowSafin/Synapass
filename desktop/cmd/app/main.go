@@ -459,7 +459,7 @@ func runWindow(st *settings, logger *slog.Logger) {
 	go func() {
 		<-ctx.Done() // Ctrl-C in a console: same graceful path as Quit
 		closeOnce(app.quit)
-		w.Terminate()
+		terminateWindow(w)
 	}()
 	go startTray(app)
 	w.Run()
@@ -601,7 +601,20 @@ func (a *windowApp) waitDone() {
 
 func (a *windowApp) quitFromUI() {
 	closeOnce(a.quit)
-	a.w.Terminate()
+	terminateWindow(a.w)
+}
+
+// terminateWindow closes the window, on the UI thread.
+//
+// On Windows the backend ends the loop with PostQuitMessage, which delivers
+// WM_QUIT to the *calling* thread's message queue. Called from the tray or a
+// signal goroutine it lands on a thread with no message loop, so the app would
+// keep running after Quit and the user had to kill it from Task Manager.
+func terminateWindow(w webview.WebView) {
+	if w == nil {
+		return
+	}
+	w.Dispatch(func() { w.Terminate() })
 }
 
 func (a *windowApp) openLogs() {

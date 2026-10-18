@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 // servers produce) is handled by the caller, not here.
 func NormalizeHTTPError(provider, model string, attempt, status int, body []byte, header http.Header) *domain.Error {
 	message, vendorCode, vendorType := parseErrorBody(body)
+	message = sanitizeProviderMessage(message)
 
 	code := codeForStatus(status, vendorCode, vendorType)
 	if message == "" {
@@ -318,7 +320,7 @@ func NormalizeTransportError(provider, model string, attempt int, err error) *do
 // gateway's own decoding is covered by tests; a malformed body means the
 // upstream is not speaking the protocol it advertises.
 func NormalizeDecodeError(provider, model string, attempt int, err error, body []byte) *domain.Error {
-	preview := truncateMessage(strings.TrimSpace(string(body)), 256)
+	preview := sanitizeProviderMessage(truncateMessage(strings.TrimSpace(string(body)), 256))
 	msg := fmt.Sprintf("provider %s returned a response that could not be decoded", provider)
 	if preview != "" {
 		msg = fmt.Sprintf("%s: %s", msg, preview)
@@ -326,6 +328,34 @@ func NormalizeDecodeError(provider, model string, attempt int, err error, body [
 	return domain.NewError(domain.ErrCodeUpstream, msg).
 		WithStatus(http.StatusBadGateway).
 		WithProvider(provider, model, attempt).Wrap(err)
+}
+
+// credentialPatterns match the shapes a credential takes when an upstream echoes
+// its own request back in an error message. Gateways commonly see bodies such as
+// "Incorrect API key provided: sk-live-..." or an echoed Authorization header;
+// relaying that to a tenant would leak one customer's secret to another (or to
+// whoever reads the client's logs).
+var credentialPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}`),
+	regexp.MustCompile(`(?i)\b(?:sk|pk|rk)-[A-Za-z0-9_-]{12,}`),
+	// The optional quotes cover a JSON body, where the field name and value
+	// are both quoted: {"api_key":"sk-..."}.
+	regexp.MustCompile(`(?i)\b(?:x-api-key|api[-_]?key|authorization|access[-_]?token)\b["']?\s*[:=]\s*["']?[^\s"',}]+`),
+}
+
+// sanitizeProviderMessage redacts credential-shaped substrings from an upstream
+// message before it is stored on an error or returned to a client.
+//
+// Over-redaction is acceptable here: the message is a diagnostic, and a
+// slightly less specific message is a much smaller cost than leaking a key.
+func sanitizeProviderMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	for _, pattern := range credentialPatterns {
+		message = pattern.ReplaceAllString(message, "[redacted]")
+	}
+	return message
 }
 
 // ReadBody reads and closes a response body with a hard cap, so a misbehaving

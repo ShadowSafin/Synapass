@@ -358,6 +358,12 @@ func (r *UsageRepository) GetByRequestID(ctx context.Context, requestID string) 
 	row := r.pool.QueryRow(ctx, query, requestID)
 	rec, err := scanUsage(row)
 	if err != nil {
+		// A missing row is an ordinary answer ("no such request"), not an
+		// infrastructure failure: callers such as feedback submission need to
+		// distinguish the two without importing the driver.
+		if isNotFound(err) {
+			return nil, nil
+		}
 		return nil, wrapDBError("get usage record", err)
 	}
 	return rec, nil

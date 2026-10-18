@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/shadowsafin/synapass/internal/domain"
+	"github.com/shadowsafin/synapass/internal/netguard"
 )
 
 // Reports returns recent reports for a tenant.
@@ -111,6 +112,18 @@ func (e *Engine) UpsertNotification(ctx context.Context, tenantID string, channe
 	}
 	if target == "" {
 		return nil, domain.NewError(domain.ErrCodeInvalidRequest, "notification target is required")
+	}
+	// A chat webhook is a URL the gateway will POST to. It is administrator
+	// input, but "administrator" is not the same as "trusted with the
+	// gateway's network position": a compromised admin key, or a well-meaning
+	// operator pasting an attacker-supplied URL, turns delivery into an SSRF
+	// primitive against loopback, the container network and cloud metadata.
+	// Email targets are addresses rather than URLs and are only logged.
+	if channel != domain.BenchmarkNotifyEmail {
+		if _, err := netguard.ValidatePublicURL(ctx, target); err != nil {
+			return nil, domain.Errorf(domain.ErrCodeInvalidRequest,
+				"notification target is not a usable public webhook URL: %v", err)
+		}
 	}
 	if len(events) == 0 {
 		events = []string{"benchmark_completed", "provider_down", "budget_exceeded"}

@@ -83,6 +83,57 @@ func TestPlaceholderAdminKeyRejectedInProduction(t *testing.T) {
 	}
 }
 
+func TestPlaceholderAdminKeyRejectedInStaging(t *testing.T) {
+	// Staging used to be treated as development, so a deployed environment
+	// could boot with the key documented in the repository. Only an explicitly
+	// local environment may use it now.
+	cfg := Default()
+	cfg.Telemetry.OTLPEndpoint = "localhost:4318"
+	cfg.App.Environment = "staging"
+	cfg.Auth.AdminKey = PlaceholderAdminKey
+
+	err := cfg.Finalize()
+	if err == nil {
+		t.Fatal("the shipped placeholder admin key must be rejected in staging")
+	}
+	if !strings.Contains(err.Error(), "placeholder") {
+		t.Errorf("error %q should name the placeholder", err.Error())
+	}
+
+	// The documented escape hatch exists for CI harnesses that must run the
+	// compose file verbatim.
+	t.Setenv("SYNAPASS_ALLOW_PLACEHOLDER_ADMIN_KEY", "true")
+	if err := cfg.Finalize(); err != nil {
+		t.Fatalf("the explicit opt-in should permit the placeholder: %v", err)
+	}
+}
+
+func TestStagingRejectsAnonymousTenantAndCORS(t *testing.T) {
+	cfg := Default()
+	cfg.Telemetry.OTLPEndpoint = "localhost:4318"
+	cfg.App.Environment = "staging"
+	cfg.Auth.AdminKey = "syn_staging_abcdefghijklmnopqrstuvwxyz0123456789"
+	cfg.Auth.AllowAnonymousTenant = "default"
+	cfg.HTTP.CORSAllowedOrigins = []string{"*"}
+
+	err := cfg.Finalize()
+	if err == nil {
+		t.Fatal("staging must not keep the development auth and CORS relaxations")
+	}
+	if !strings.Contains(err.Error(), "allow_anonymous_tenant") {
+		t.Errorf("error %q should name the anonymous tenant setting", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cors_allowed_origins") {
+		t.Errorf("error %q should name the CORS wildcard", err.Error())
+	}
+
+	// The same settings remain valid for a local evaluation.
+	cfg.App.Environment = "development"
+	if err := cfg.Finalize(); err != nil {
+		t.Fatalf("development may keep the relaxations: %v", err)
+	}
+}
+
 func TestDefaultConfigFinalizesAndValidates(t *testing.T) {
 	cfg := deployableDefaults()
 	if err := cfg.Finalize(); err != nil {
@@ -624,6 +675,21 @@ func TestIsProductionIsExplicit(t *testing.T) {
 		"":            false,
 	}
 
+	// Development affordances (anonymous tenant, CORS wildcard, the published
+	// placeholder key) apply to a local environment only. Staging is deployed
+	// and must be held to the same standard as production for those checks.
+	development := map[string]bool{
+		"development": true,
+		"dev":         true,
+		"test":        true,
+		"":            true,
+		"staging":     false,
+		"stage":       false,
+		"production":  false,
+		"prod":        false,
+		"Production":  false,
+	}
+
 	for environment, wantProduction := range cases {
 		cfg := Default()
 		cfg.App.Environment = environment
@@ -631,8 +697,8 @@ func TestIsProductionIsExplicit(t *testing.T) {
 		if got := cfg.IsProduction(); got != wantProduction {
 			t.Errorf("environment %q: IsProduction = %v, want %v", environment, got, wantProduction)
 		}
-		if got := cfg.IsDevelopment(); got == wantProduction {
-			t.Errorf("environment %q: IsDevelopment should be the inverse of IsProduction", environment)
+		if want, ok := development[environment]; ok && cfg.IsDevelopment() != want {
+			t.Errorf("environment %q: IsDevelopment = %v, want %v", environment, cfg.IsDevelopment(), want)
 		}
 	}
 }

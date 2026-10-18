@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,11 @@ import (
 	"github.com/shadowsafin/synapass/internal/cost"
 	"github.com/shadowsafin/synapass/internal/domain"
 )
+
+// maxFeedbackCommentLength bounds the free-text comment a client may attach to a
+// feedback event. The column is unbounded, and an inference key must not be able
+// to write arbitrary volumes through it.
+const maxFeedbackCommentLength = 4096
 
 // priceReplayUsage costs one replayed execution through the versioned-sheet
 // resolution live traffic uses, degrading to registry rates exactly as the
@@ -663,11 +669,50 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.NewError(domain.ErrCodeInvalidRequest, "'request_id' is required"), metaFromContext(rc, nil))
 		return
 	}
+
+	// Score is documented as -1 | 0 | 1 (down/neutral/up) or a 1..5 rating.
+	// Without a range check a caller can write an arbitrary value into the
+	// scoring/eval tables that later code treats as meaningful.
+	if math.IsNaN(body.Score) || math.IsInf(body.Score, 0) || body.Score < -1 || body.Score > 5 {
+		writeError(w, domain.NewError(domain.ErrCodeInvalidRequest,
+			"'score' must be -1, 0, 1 or a 1..5 rating"), metaFromContext(rc, nil))
+		return
+	}
+	if len(body.Comment) > maxFeedbackCommentLength {
+		writeError(w, domain.Errorf(domain.ErrCodeInvalidRequest,
+			"'comment' exceeds %d characters", maxFeedbackCommentLength), metaFromContext(rc, nil))
+		return
+	}
+
+	// The request id is client-supplied, so it must be proved to belong to the
+	// caller before anything is written against it. Feedback feeds routing
+	// scores and eval results; letting tenant B rate tenant A's requests would
+	// be a cross-tenant integrity write, not a cosmetic one. A miss returns the
+	// same 404 as an unknown id so the endpoint does not confirm that another
+	// tenant's request exists.
+	tenantID := ""
+	if rc != nil {
+		tenantID = rc.TenantID()
+	}
+	if s.repos == nil || s.repos.Usage == nil {
+		writeError(w, domain.NewError(domain.ErrCodeUnavailable,
+			"the usage store is unavailable"), metaFromContext(rc, nil))
+		return
+	}
+	record, err := s.awaitUsageRecord(ctx, body.RequestID)
+	if err != nil {
+		writeError(w, err, metaFromContext(rc, nil))
+		return
+	}
+	if record == nil || record.TenantID != tenantID {
+		writeError(w, domain.NewError(domain.ErrCodeNotFound,
+			"no request with that id is visible to this tenant"), metaFromContext(rc, nil))
+		return
+	}
+
 	event := &domain.FeedbackEvent{
 		RequestID: domain.RequestID(body.RequestID), Score: body.Score, Comment: body.Comment,
-	}
-	if rc != nil {
-		event.TenantID = rc.TenantID()
+		TenantID: tenantID,
 	}
 	if s.replaySvc != nil {
 		if err := s.replaySvc.SubmitFeedback(ctx, event); err != nil {
@@ -688,6 +733,38 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 		s.metrics.FeedbackTotal.WithLabelValues(tenant).Inc()
 	}
 	writeJSON(w, http.StatusCreated, event)
+}
+
+// awaitUsageRecord looks up a usage row, tolerating the telemetry pipeline's
+// batching delay.
+//
+// Usage rows are written by an asynchronous recorder (2s flush by default), so a
+// client that submits feedback immediately after a fast response can legitimately
+// arrive before the row exists. The retry closes that window without weakening the
+// ownership check: an id that is not this tenant's still ends in 404, it just
+// takes a few hundred milliseconds to say so.
+func (s *Server) awaitUsageRecord(ctx context.Context, requestID string) (*domain.UsageRecord, error) {
+	const attempts = 6
+	const interval = 500 * time.Millisecond
+
+	for attempt := 0; attempt < attempts; attempt++ {
+		record, err := s.repos.Usage.GetByRequestID(ctx, requestID)
+		if err != nil {
+			return nil, err
+		}
+		if record != nil {
+			return record, nil
+		}
+		if attempt == attempts-1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+	return nil, nil
 }
 
 // --- Endpoints ---

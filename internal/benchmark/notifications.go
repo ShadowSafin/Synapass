@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shadowsafin/synapass/internal/domain"
+	"github.com/shadowsafin/synapass/internal/netguard"
 )
 
 // notify fans out to every enabled rule subscribed to event.
@@ -83,12 +84,22 @@ func deliverNotification(rule domain.BenchmarkNotification, payload map[string]a
 	default:
 		text = body
 	}
+	// Re-validate at delivery time as well as at write time: the rule may have
+	// been stored before this validation existed, and the host may resolve
+	// differently now. The client repeats the check at connect time, which is
+	// what actually closes the DNS-rebinding gap.
+	if _, err := netguard.ValidatePublicURL(ctx, url); err != nil {
+		logger.Warn("benchmark notification target refused",
+			"channel", string(rule.Channel), "error", err)
+		return
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBufferString(text))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	client := netguard.NewPublicClient(10 * time.Second)
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Warn("benchmark notification delivery failed", "channel", string(rule.Channel), "error", err)
 		return

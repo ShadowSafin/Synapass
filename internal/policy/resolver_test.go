@@ -161,6 +161,76 @@ func TestResolverHonoursPinnedPolicy(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsPinnedPolicyFromAnotherTenant(t *testing.T) {
+	repo := &fakeRepository{policies: []domain.RoutingPolicy{
+		{
+			ID: "tenant-a", Name: "tenant-a", Enabled: true,
+			Match: domain.PolicyMatch{TenantIDs: []string{"t-a"}},
+		},
+		{ID: "wildcard", Name: "wildcard", Enabled: true, Match: domain.PolicyMatch{}},
+	}}
+	resolver := NewResolver(repo, time.Minute)
+
+	rc := &domain.RequestContext{
+		RequestedModel: "gpt-4o",
+		Tenant:         &domain.Tenant{ID: "t-b"},
+		PolicyID:       "tenant-a",
+	}
+
+	selected, err := resolver.Resolve(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if selected == nil || selected.ID != "wildcard" {
+		t.Fatalf("selected %v, want the caller's own policy rather than another tenant's", selected)
+	}
+}
+
+func TestResolverRejectsPinnedPolicyScopedToAnotherKeyOrEndpoint(t *testing.T) {
+	repo := &fakeRepository{policies: []domain.RoutingPolicy{
+		{ID: "key-a", Name: "key-a", Enabled: true, Match: domain.PolicyMatch{APIKeyIDs: []string{"k-a"}}},
+		{ID: "endpoint-a", Name: "endpoint-a", Enabled: true, Match: domain.PolicyMatch{EndpointIDs: []string{"e-a"}}},
+		{ID: "wildcard", Name: "wildcard", Enabled: true, Match: domain.PolicyMatch{}},
+	}}
+	resolver := NewResolver(repo, time.Minute)
+
+	for _, pin := range []string{"key-a", "endpoint-a"} {
+		rc := &domain.RequestContext{
+			RequestedModel: "gpt-4o",
+			Tenant:         &domain.Tenant{ID: "t-b"},
+			APIKey:         &domain.APIKey{ID: "k-b"},
+			EndpointID:     "e-b",
+			PolicyID:       pin,
+		}
+		selected, err := resolver.Resolve(context.Background(), rc)
+		if err != nil {
+			t.Fatalf("Resolve(%s): %v", pin, err)
+		}
+		if selected == nil || selected.ID != "wildcard" {
+			t.Fatalf("pinned %s selected %v, want the wildcard fallback", pin, selected)
+		}
+	}
+}
+
+func TestResolverSkipsDisabledPinnedPolicyFromStore(t *testing.T) {
+	// The cached list is empty, so the explicit-id path falls through to the
+	// repository; a disabled row there must not become routable just because a
+	// caller named it.
+	repo := &fakeRepository{policies: []domain.RoutingPolicy{
+		{ID: "disabled", Name: "disabled", Enabled: false, Match: domain.PolicyMatch{}},
+	}}
+	resolver := NewResolver(repo, time.Minute)
+
+	rc := &domain.RequestContext{RequestedModel: "gpt-4o", PolicyID: "disabled"}
+	selected, err := resolver.Resolve(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if selected != nil {
+		t.Fatalf("a disabled pinned policy must not be selected, got %q", selected.ID)
+	}
+}
+
 func TestResolverCachesWithinTTL(t *testing.T) {
 	repo := &fakeRepository{policies: []domain.RoutingPolicy{
 		{ID: "p", Name: "p", Enabled: true, Match: domain.PolicyMatch{}},
